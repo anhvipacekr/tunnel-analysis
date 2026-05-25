@@ -14,7 +14,7 @@ except Exception:
     pass
 warnings.filterwarnings("ignore", category=UserWarning)
 
-﻿from tunnel_analysis.main import main
+from tunnel_analysis.main import main
 
 if __name__ == "__main__":
     raise SystemExit(main())
