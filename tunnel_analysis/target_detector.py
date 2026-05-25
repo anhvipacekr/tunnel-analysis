@@ -121,98 +121,120 @@ class TargetDetector:
     # ── 2. Checkerboard detection (FFT grid analysis) ──────────────────────
     def detect_checkerboard_targets(
         self, pts: np.ndarray, intensity: Optional[np.ndarray] = None,
-        scan_idx: int = 0, min_cluster_pts: int = 30,
+        scan_idx: int = 0, min_cluster_pts: int = 5,
         max_cluster_pts: int = 10000,
-        cell_size_range: Tuple[float, float] = (0.05, 0.30),
-        min_contrast_ratio: float = 2.0, eps: float = 0.1,
+        cell_size_range: Tuple[float, float] = (0.05, 0.60),
+        min_contrast_ratio: float = 1.1, eps: float = 0.10,
+        max_thickness: float = 0.005,
     ) -> List[Target]:
+        """Detect checkerboard/flat targets using plane fitting + intensity contrast.
+        Strategy: cluster high-intensity points, fit plane, check thickness and size.
+        """
         pts = validate_xyz(pts)
         targets: List[Target] = []
+        if intensity is None or len(intensity) != len(pts):
+            return targets
 
-        # Use intensity-weighted clustering if available
-        if intensity is not None and len(intensity) == len(pts):
-            int_arr = np.asarray(intensity, dtype=np.float64)
-            thr = float(np.percentile(int_arr, 40))
-            mask = int_arr >= thr
-            if mask.sum() >= min_cluster_pts:
-                pts_use = pts[mask]
-                int_use = int_arr[mask]
-            else:
-                pts_use = pts; int_use = int_arr
-        else:
-            pts_use = pts; int_use = None
+        int_arr = np.asarray(intensity, dtype=np.float64)
 
-        clusters = self._fast_dbscan(pts_use, eps=eps, min_pts=min_cluster_pts)
+        # Use p95 threshold to get candidate points
+        thr = float(np.percentile(int_arr, 95))
+        mask = int_arr >= thr
+        if mask.sum() < min_cluster_pts:
+            return targets
+
+        hi_pts = pts[mask]
+
+        # Cluster with eps=0.10m
+        clusters = self._fast_dbscan(hi_pts, eps=eps, min_pts=min_cluster_pts)
 
         for cp in clusters:
-            if len(cp) < min_cluster_pts: continue
-            if len(cp) > max_cluster_pts: continue
+            n = len(cp)
+            if n < min_cluster_pts or n > max_cluster_pts:
+                continue
 
             # Fit plane
-            result = self._fit_plane(cp, tol=0.012)
-            if result is None: continue
+            result = self._fit_plane(cp, tol=0.010)
+            if result is None:
+                continue
             normal, centroid, thickness, inliers = result
-            if thickness > 0.030: continue
+
+            # Thickness check
+            if thickness > max_thickness:
+                continue
 
             inlier_pts = cp[inliers]
-            if len(inlier_pts) < min_cluster_pts: continue
+            if len(inlier_pts) < min_cluster_pts:
+                continue
 
-            # Project onto plane
-            u = _unit(np.cross(normal, np.array([0,0,1])
-                               if abs(normal[2]) < 0.9 else np.array([1,0,0])))
+            # Size check
+            u = _unit(np.cross(normal, np.array([0,0,1.0])
+                               if abs(normal[2]) < 0.9 else np.array([1,0,0.0])))
             v = np.cross(normal, u)
             pu = inlier_pts @ u
             pv = inlier_pts @ v
             width  = float(pu.max() - pu.min())
             height = float(pv.max() - pv.min())
-
-            # Size check
-            min_sz = cell_size_range[0] * 2
-            max_sz = cell_size_range[1] * 12
-            if not (min_sz <= width <= max_sz and min_sz <= height <= max_sz):
+            if not (0.05 <= width <= 0.80 and 0.05 <= height <= 0.80):
                 continue
 
-            # Get intensity for inlier points
-            if int_use is not None:
-                if cKDTree is not None:
-                    tree = cKDTree(pts_use)
-                    _, idx = tree.query(inlier_pts, k=1, workers=-1)
-                    int_inliers = int_use[idx]
-                else:
-                    int_inliers = np.ones(len(inlier_pts))
+            # Get ALL points near this plane (not just high-intensity)
+            # to compute real contrast
+            dist_to_plane = np.abs((pts - centroid) @ normal)
+            near_mask = dist_to_plane < max_thickness * 3
+            # Also check within XY extent
+            d_all = pts[near_mask] - centroid
+            pu_all = d_all @ u
+            pv_all = d_all @ v
+            in_extent = ((pu_all >= pu.min() - 0.02) & (pu_all <= pu.max() + 0.02) &
+                         (pv_all >= pv.min() - 0.02) & (pv_all <= pv.max() + 0.02))
+            near_idx = np.where(near_mask)[0][in_extent]
+
+            if len(near_idx) < min_cluster_pts:
+                # Use only high-intensity points
+                int_local = int_arr[mask][np.where(
+                    np.isin(np.arange(len(hi_pts)),
+                            np.where(np.all(np.abs(hi_pts - centroid) < 0.5, axis=1))[0]))[0]]
+                if len(int_local) < 2:
+                    int_local = int_arr[mask]
             else:
-                int_inliers = np.ones(len(inlier_pts))
+                int_local = int_arr[near_idx]
 
-            # FFT-based grid pattern detection
+            # Contrast: ratio of high to low intensity
+            p75 = float(np.percentile(int_local, 75))
+            p25 = float(np.percentile(int_local, 25))
+            contrast = p75 / max(p25, 1.0)
+
+            # FFT grid score
             grid_score, cell_size = self._fft_grid_score(
-                pu, pv, int_inliers, cell_size_range)
+                pu, pv, int_arr[mask][
+                    np.where(np.all(np.abs(hi_pts - centroid) < max(width, height), axis=1))[0]
+                ] if len(inlier_pts) > 0 else np.ones(len(inlier_pts)),
+                cell_size_range)
 
-            # Contrast check
-            p75 = float(np.percentile(int_inliers, 75))
-            p25 = float(np.percentile(int_inliers, 25))
-            contrast = p75 / max(p25, 1e-6)
+            # Confidence
+            conf = min(1.0,
+                0.35 * min(contrast / 2.0, 1.0) +
+                0.30 * grid_score +
+                0.35 * (1.0 - thickness / max_thickness))
 
-            if contrast < min_contrast_ratio and grid_score < 0.3:
+            # Boost if size matches standard target
+            std_match = any(abs(max(width, height) - s) < 0.05
+                            for s in CHECKER_SIZES_STD)
+            if std_match:
+                conf = min(1.0, conf + 0.15)
+
+            if conf < 0.15:
                 continue
 
-            conf = min(1.0, 0.4 * min(contrast / 3.0, 1.0) +
-                            0.4 * grid_score +
-                            0.2 * (1.0 - thickness / 0.030))
-
-            # Check if size matches standard
-            std_match = any(abs(max(width, height) - s) < 0.03
-                            for s in CHECKER_SIZES_STD)
-            if std_match: conf = min(1.0, conf + 0.15)
-
-            if conf < 0.20: continue
             targets.append(Target(
                 type="checkerboard", center=centroid, normal=normal,
-                confidence=conf, n_points=len(inliers),
+                confidence=conf, n_points=len(inlier_pts),
                 residual_mm=thickness * 1e3, scan_idx=scan_idx))
 
         return targets
 
-    # ── 3. Intensity-based detection ───────────────────────────────────────
+
     def detect_intensity_targets(
         self, pts: np.ndarray, intensity: np.ndarray,
         scan_idx: int = 0, percentile: float = 97.0,
@@ -235,7 +257,10 @@ class TargetDetector:
             dists = np.linalg.norm(hi_pts - center, axis=1)
             nearby = dists < eps
             peak = float(hi_int[nearby].max()) if nearby.any() else thr
-            conf = min(1.0, (peak - thr) / max(intensity.max() - thr, 1e-9))
+            # Confidence based on cluster size and intensity relative to background
+            bg_med = float(np.median(intensity))
+            conf = min(1.0, max(0.1, (peak - bg_med) / max(bg_med, 1e-9) * 0.3 +
+                                     min(n, 500) / 500.0 * 0.7))
             targets.append(Target(
                 type="intensity", center=center, intensity=peak,
                 confidence=conf, n_points=n, scan_idx=scan_idx))
