@@ -37,6 +37,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.ifc_mod   = TunnelIFCExporter()
         self.tgt_mod   = TargetDetector()
         self._targets: List[Target] = []   # all detected targets
+        self._manual_pick_mode: bool = False   # manual picking active
         self.rag_mod   = TunnelRAGAssistant()
         # Initialize RAG in background
         import threading
@@ -976,29 +977,123 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._start_worker("target_detect", _task)
 
     def _slot_target_manual(self) -> None:
-        """Enable manual target picking mode."""
-        if self.plotter is None: return
-        self._log("Manual target: click a point in 3D viewport to place target.")
+        """Toggle manual target picking mode."""
+        if self.plotter is None:
+            self._log("Load a point cloud first."); return
+        if self._manual_pick_mode:
+            self._stop_manual_pick()
+        else:
+            self._start_manual_pick()
+
+    def _start_manual_pick(self) -> None:
+        """Start manual target picking mode."""
+        self._manual_pick_mode = True
+        self._hdr("Manual Target Picking",
+                  "Click on target location in 3D viewport. Tool will auto-refine position.")
+        # Update button appearance
+        for i in range(self.right_tabs.count()):
+            if self.right_tabs.tabText(i) == "Targets":
+                self.right_tabs.setCurrentIndex(i); break
+        # Show instruction overlay
+        if self.plotter:
+            self.plotter.add_text(
+                "PICK MODE: Click on target location
+Press Q or click [+ Manual] again to exit",
+                position="lower_left", font_size=10,
+                color="#F59E0B", name="pick_instruction")
+            self.plotter.render()
         try:
             self.plotter.enable_point_picking(
                 callback=self._on_manual_target_pick,
-                show_message=True, color="#F59E0B",
-                point_size=12, use_picker=True, pickable_window=False)
-            self.sb_msg.setText("Click in 3D viewport to place manual target. Press Q to exit.")
+                show_message=False, color="#F59E0B",
+                point_size=14, use_picker=True,
+                pickable_window=False)
         except Exception as e:
-            self._log(f"Manual pick error: {e}")
+            self._log(f"Pick mode error: {e}")
+        self.sb_msg.setText(
+            "PICK MODE active — Click on target in 3D viewport | Click [+ Manual] again to exit")
+        self._log("Manual pick mode started. Click on target locations in 3D viewport.")
+
+    def _stop_manual_pick(self) -> None:
+        """Stop manual target picking mode."""
+        self._manual_pick_mode = False
+        if self.plotter:
+            try:
+                self.plotter.remove_actor("pick_instruction")
+                self.plotter.disable_picking()
+            except Exception:
+                pass
+            self.plotter.render()
+        self.sb_msg.setText("Pick mode stopped.")
+        self._log(f"Manual pick mode stopped. Total targets: {len(self._targets)}")
 
     def _on_manual_target_pick(self, point) -> None:
+        """Handle manual target pick with auto-refinement."""
         if point is None: return
         pts = self.context.working_points
-        t = self.tgt_mod.add_manual_target(
-            np.asarray(point), scan_idx=self.context.active_index,
-            name="M" + str(sum(1 for x in self._targets if x.type == "manual") + 1).zfill(2),
-            pts=pts)
+        if pts is None: return
+        pick_pt = np.asarray(point, dtype=np.float64)
+        n_manual = sum(1 for x in self._targets if x.type == "manual") + 1
+        name = "M" + str(n_manual).zfill(2)
+
+        # Auto-refine: fit local plane and find centroid
+        refined_center, normal, residual_mm = self._refine_target_position(pick_pt, pts)
+
+        t = Target(
+            type="manual",
+            name=name,
+            center=refined_center,
+            normal=normal,
+            confidence=1.0,
+            n_points=0,
+            residual_mm=residual_mm,
+            scan_idx=self.context.active_index)
         self._targets.append(t)
         self._refresh_target_table()
-        self._render_target_markers()
-        self._log(f"Manual target added: {t.name} at {np.round(t.center, 3).tolist()}")
+
+        # Show marker immediately
+        if self.plotter:
+            try:
+                self.plotter.add_point_labels(
+                    [refined_center], [name],
+                    font_size=12, text_color="#F59E0B",
+                    bold=True, show_points=True,
+                    point_color="#F59E0B", point_size=18,
+                    name="tgt_" + t.id, reset_camera=False)
+                # Flash effect - temporary large sphere
+                import pyvista as _pv
+                sp = _pv.Sphere(radius=0.05, center=refined_center)
+                self.plotter.add_mesh(sp, color="#F59E0B", opacity=0.6,
+                    name="tgt_flash_" + t.id, reset_camera=False)
+                self.plotter.render()
+            except Exception:
+                pass
+
+        self._log(f"Target {name} placed at {np.round(refined_center,3).tolist()} "
+                  f"(residual={residual_mm:.1f}mm)")
+
+    def _refine_target_position(
+        self, pick_pt: np.ndarray, pts: np.ndarray,
+        search_r: float = 0.25
+    ) -> Tuple[np.ndarray, Optional[np.ndarray], float]:
+        """Refine picked point to local plane centroid."""
+        if cKDTree is None:
+            return pick_pt, None, 0.0
+        try:
+            from scipy.spatial import cKDTree as _kd
+            tree = _kd(pts)
+            local_idx = tree.query_ball_point(pick_pt, search_r)
+            if len(local_idx) < 10:
+                return pick_pt, None, 0.0
+            lp = pts[local_idx]
+            # Fit plane
+            result = self.tgt_mod._fit_plane(lp, tol=0.015)
+            if result is None:
+                return lp.mean(axis=0), None, 0.0
+            normal, centroid, thickness, inliers = result
+            return centroid, normal, thickness * 1e3
+        except Exception:
+            return pick_pt, None, 0.0
 
     def _slot_target_match(self) -> None:
         """Auto-match targets between scan stations."""
