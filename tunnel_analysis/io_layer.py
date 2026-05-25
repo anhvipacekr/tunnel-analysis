@@ -39,14 +39,14 @@ def _read_las(fp: str, max_points: int = MAX_POINTS_DEFAULT) -> PointCloudBundle
     if intensity is not None and float(intensity.max()) < 1e-6:
         if all(hasattr(las, c) for c in ("red", "green", "blue")):
             if total > max_points:
-                r = np.asarray(las.red, dtype=np.float64)[idx]
-                g = np.asarray(las.green, dtype=np.float64)[idx]
-                b = np.asarray(las.blue, dtype=np.float64)[idx]
+                r_arr = np.asarray(las.red, dtype=np.float64)[idx]
+                g_arr = np.asarray(las.green, dtype=np.float64)[idx]
+                b_arr = np.asarray(las.blue, dtype=np.float64)[idx]
             else:
-                r = np.asarray(las.red, dtype=np.float64)
-                g = np.asarray(las.green, dtype=np.float64)
-                b = np.asarray(las.blue, dtype=np.float64)
-            luminance = 0.299*r + 0.587*g + 0.114*b
+                r_arr = np.asarray(las.red, dtype=np.float64)
+                g_arr = np.asarray(las.green, dtype=np.float64)
+                b_arr = np.asarray(las.blue, dtype=np.float64)
+            luminance = 0.299*r_arr + 0.587*g_arr + 0.114*b_arr
             if float(luminance.max()) > 1e-6:
                 intensity = luminance
         colors = None

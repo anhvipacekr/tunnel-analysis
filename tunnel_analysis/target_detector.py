@@ -334,78 +334,131 @@ class TargetDetector:
 
     # ── Faro 3D Survey Point target detection ─────────────────────────────
     def detect_faro_targets(
-        self, pts: np.ndarray, intensity: Optional[np.ndarray] = None,
-        scan_idx: int = 0, min_cluster_pts: int = 20,
+        self,
+        pts: np.ndarray,
+        intensity: Optional[np.ndarray] = None,
+        scan_idx: int = 0,
+        min_cluster_pts: int = 15,
         max_cluster_pts: int = 50000,
         target_sizes: tuple = (0.210, 0.297, 0.420),
-        size_tol: float = 0.05, max_thickness: float = 0.008,
+        size_tol: float = 0.06,
+        max_thickness: float = 0.012,
         eps: float = 0.08,
+        search_radius: float = 0.35,
     ) -> List[Target]:
-        """Detect Faro 3D Survey Point targets (white bg + 2 gray squares)."""
+        """Detect Faro 3D Survey Point targets using local variance approach.
+        Steps:
+        1. Find high local luminance variance regions (target = high contrast area)
+        2. For each candidate: fit plane in small radius
+        3. Check bimodal luminance (white bg + gray squares)
+        """
         pts = validate_xyz(pts)
         targets: List[Target] = []
         if intensity is None or len(intensity) != len(pts):
             return targets
-        int_arr = np.asarray(intensity, dtype=np.float64)
-        # Cluster ALL points (no intensity pre-filter)
-        clusters = self._fast_dbscan(pts, eps=eps, min_pts=min_cluster_pts)
-        for cp in clusters:
-            n = len(cp)
-            if n < min_cluster_pts or n > max_cluster_pts:
+
+        lum = np.asarray(intensity, dtype=np.float64)
+        if cKDTree is None:
+            return targets
+
+        # Step 1: Find high local variance candidates
+        tree = cKDTree(pts)
+        sample_step = max(1, len(pts) // 5000)
+        sample = pts[::sample_step]
+        _, nn_idx = tree.query(sample, k=min(25, len(pts)-1), workers=-1)
+        local_var = lum[nn_idx].std(axis=1)
+        thr_var = float(np.percentile(local_var, 95))
+        hi_var_mask = local_var >= thr_var
+        candidates = sample[hi_var_mask]
+
+        if len(candidates) == 0:
+            return targets
+
+        # Deduplicate candidates (merge within search_radius)
+        used = np.zeros(len(candidates), dtype=bool)
+        dedup = []
+        for i in range(len(candidates)):
+            if used[i]: continue
+            nearby = np.linalg.norm(candidates - candidates[i], axis=1) < search_radius * 0.8
+            dedup.append(candidates[nearby].mean(axis=0))
+            used[nearby] = True
+        candidates = np.array(dedup)
+
+        # Step 2: Per candidate - local plane fit
+        seen_centers = []
+        for cand in candidates:
+            local_idx = tree.query_ball_point(cand, search_radius)
+            if len(local_idx) < min_cluster_pts:
                 continue
-            result = self._fit_plane(cp, tol=0.010)
+            lp = pts[local_idx]
+            ll = lum[local_idx]
+
+            # Fit plane
+            result = self._fit_plane(lp, tol=0.012)
             if result is None:
                 continue
             normal, centroid, thickness, inliers = result
             if thickness > max_thickness:
                 continue
-            inlier_pts = cp[inliers]
+
+            inlier_pts = lp[inliers]
             if len(inlier_pts) < min_cluster_pts:
                 continue
+
+            # Size check
             u = _unit(np.cross(normal, np.array([0,0,1.0])
                                if abs(normal[2]) < 0.9 else np.array([1,0,0.0])))
             v = np.cross(normal, u)
             pu = inlier_pts @ u; pv = inlier_pts @ v
-            width = float(pu.max() - pu.min())
+            width  = float(pu.max() - pu.min())
             height = float(pv.max() - pv.min())
-            if not (0.15 <= width <= 0.50 and 0.15 <= height <= 0.50):
+            if not (0.08 <= width <= 0.60 and 0.08 <= height <= 0.60):
                 continue
-            # Get intensity of inlier points
-            if cKDTree is not None:
-                tree = cKDTree(pts)
-                _, idx_map = tree.query(inlier_pts, k=1, workers=-1)
-                int_local = int_arr[idx_map]
-            else:
-                int_local = int_arr[:len(inlier_pts)]
-            if len(int_local) < min_cluster_pts:
+
+            # Step 3: Bimodal luminance check
+            lum_in = ll[inliers]
+            lum_range = float(lum_in.max() - lum_in.min())
+            if lum_range < 3000:
                 continue
-            int_range = int_local.max() - int_local.min()
-            if int_range < 1000:
-                continue  # no contrast at all
-            int_norm = (int_local - int_local.min()) / max(int_range, 1e-6)
-            n_gray = int((int_norm < 0.5).sum())
-            gray_ratio = n_gray / max(len(int_local), 1)
-            if not (0.15 <= gray_ratio <= 0.85):
+            lum_norm = (lum_in - lum_in.min()) / lum_range
+            dark_ratio = float((lum_norm < 0.45).sum()) / max(len(lum_in), 1)
+            if not (0.10 <= dark_ratio <= 0.85):
                 continue
-            gray_mean  = float(int_local[int_norm < 0.5].mean()) if n_gray > 0 else 0
-            white_mean = float(int_local[int_norm >= 0.5].mean()) if (int_norm >= 0.5).sum() > 0 else 1
-            contrast = white_mean / max(gray_mean, 1.0)
-            if contrast < 1.15:
+            white_mean = float(lum_in[lum_norm >= 0.45].mean()) if (lum_norm >= 0.45).sum() > 0 else 1
+            dark_mean  = float(lum_in[lum_norm < 0.45].mean()) if (lum_norm < 0.45).sum() > 0 else 0
+            contrast = white_mean / max(dark_mean, 1.0)
+            if contrast < 1.3:
                 continue
+
+            # Deduplicate with already found targets
+            too_close = any(np.linalg.norm(centroid - sc) < search_radius * 0.5
+                            for sc in seen_centers)
+            if too_close:
+                continue
+            seen_centers.append(centroid)
+
+            # Size match bonus
             size_match = any(
                 (abs(width - s1) < size_tol and abs(height - s2) < size_tol) or
                 (abs(width - s2) < size_tol and abs(height - s1) < size_tol)
                 for s1 in target_sizes for s2 in target_sizes)
+
             conf = min(1.0,
-                0.30 * min(contrast / 3.0, 1.0) +
+                0.30 * min(contrast / 4.0, 1.0) +
                 0.25 * (1.0 - thickness / max_thickness) +
-                0.25 * (1.0 if size_match else 0.5) +
-                0.20 * (1.0 - abs(gray_ratio - 0.45) / 0.35))
+                0.25 * (1.0 if size_match else 0.6) +
+                0.20 * (1.0 - abs(dark_ratio - 0.40) / 0.45))
+
             targets.append(Target(
-                type="faro_target", center=centroid, normal=normal,
-                confidence=conf, n_points=len(inlier_pts),
-                residual_mm=thickness * 1e3, scan_idx=scan_idx))
+                type="faro_target",
+                center=centroid, normal=normal,
+                confidence=conf,
+                n_points=len(inlier_pts),
+                residual_mm=thickness * 1e3,
+                scan_idx=scan_idx))
+
         return targets
+
 
     # ── Private helpers ────────────────────────────────────────────────────
     @staticmethod
