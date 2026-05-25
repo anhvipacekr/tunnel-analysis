@@ -997,8 +997,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         # Show instruction overlay
         if self.plotter:
             self.plotter.add_text(
-                "PICK MODE: Click on target location
-Press Q or click [+ Manual] again to exit",
+                "PICK MODE: Click on target location" + chr(10) + "Press [+ Manual] again to exit",
                 position="lower_left", font_size=10,
                 color="#F59E0B", name="pick_instruction")
             self.plotter.render()
