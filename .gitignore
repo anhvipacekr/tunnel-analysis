@@ -1,0 +1,38 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+.venv311/
+venv/
+
+# Data files (large)
+*.las
+*.laz
+*.ply
+*.ifc
+*.csv
+*.xlsx
+*.pdf
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temp
+*.tmp
+*.log
+__pycache__/
+.pytest_cache/
