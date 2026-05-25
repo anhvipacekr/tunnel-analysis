@@ -60,6 +60,13 @@ class TargetDetector:
         spacing = self._estimate_spacing(pts)
         targets: List[Target] = []
 
+        # Always try Faro target detection if intensity available
+        if intensity is not None:
+            targets.extend(self.detect_faro_targets(
+                pts, intensity=intensity, scan_idx=scan_idx,
+                min_cluster_pts=min_cluster_pts,
+                eps=max(spacing * 10, 0.08)))
+
         if detect_intensity and intensity is not None:
             targets.extend(self.detect_intensity_targets(
                 pts, intensity, scan_idx=scan_idx,
@@ -324,6 +331,81 @@ class TargetDetector:
         pts = validate_xyz(pts)
         ones = np.ones((len(pts), 1))
         return (T @ np.hstack([pts, ones]).T).T[:, :3]
+
+    # ── Faro 3D Survey Point target detection ─────────────────────────────
+    def detect_faro_targets(
+        self, pts: np.ndarray, intensity: Optional[np.ndarray] = None,
+        scan_idx: int = 0, min_cluster_pts: int = 20,
+        max_cluster_pts: int = 50000,
+        target_sizes: tuple = (0.210, 0.297, 0.420),
+        size_tol: float = 0.05, max_thickness: float = 0.008,
+        eps: float = 0.08,
+    ) -> List[Target]:
+        """Detect Faro 3D Survey Point targets (white bg + 2 gray squares)."""
+        pts = validate_xyz(pts)
+        targets: List[Target] = []
+        if intensity is None or len(intensity) != len(pts):
+            return targets
+        int_arr = np.asarray(intensity, dtype=np.float64)
+        # Cluster ALL points (no intensity pre-filter)
+        clusters = self._fast_dbscan(pts, eps=eps, min_pts=min_cluster_pts)
+        for cp in clusters:
+            n = len(cp)
+            if n < min_cluster_pts or n > max_cluster_pts:
+                continue
+            result = self._fit_plane(cp, tol=0.010)
+            if result is None:
+                continue
+            normal, centroid, thickness, inliers = result
+            if thickness > max_thickness:
+                continue
+            inlier_pts = cp[inliers]
+            if len(inlier_pts) < min_cluster_pts:
+                continue
+            u = _unit(np.cross(normal, np.array([0,0,1.0])
+                               if abs(normal[2]) < 0.9 else np.array([1,0,0.0])))
+            v = np.cross(normal, u)
+            pu = inlier_pts @ u; pv = inlier_pts @ v
+            width = float(pu.max() - pu.min())
+            height = float(pv.max() - pv.min())
+            if not (0.15 <= width <= 0.50 and 0.15 <= height <= 0.50):
+                continue
+            # Get intensity of inlier points
+            if cKDTree is not None:
+                tree = cKDTree(pts)
+                _, idx_map = tree.query(inlier_pts, k=1, workers=-1)
+                int_local = int_arr[idx_map]
+            else:
+                int_local = int_arr[:len(inlier_pts)]
+            if len(int_local) < min_cluster_pts:
+                continue
+            int_range = int_local.max() - int_local.min()
+            if int_range < 1000:
+                continue  # no contrast at all
+            int_norm = (int_local - int_local.min()) / max(int_range, 1e-6)
+            n_gray = int((int_norm < 0.5).sum())
+            gray_ratio = n_gray / max(len(int_local), 1)
+            if not (0.15 <= gray_ratio <= 0.85):
+                continue
+            gray_mean  = float(int_local[int_norm < 0.5].mean()) if n_gray > 0 else 0
+            white_mean = float(int_local[int_norm >= 0.5].mean()) if (int_norm >= 0.5).sum() > 0 else 1
+            contrast = white_mean / max(gray_mean, 1.0)
+            if contrast < 1.15:
+                continue
+            size_match = any(
+                (abs(width - s1) < size_tol and abs(height - s2) < size_tol) or
+                (abs(width - s2) < size_tol and abs(height - s1) < size_tol)
+                for s1 in target_sizes for s2 in target_sizes)
+            conf = min(1.0,
+                0.30 * min(contrast / 3.0, 1.0) +
+                0.25 * (1.0 - thickness / max_thickness) +
+                0.25 * (1.0 if size_match else 0.5) +
+                0.20 * (1.0 - abs(gray_ratio - 0.45) / 0.35))
+            targets.append(Target(
+                type="faro_target", center=centroid, normal=normal,
+                confidence=conf, n_points=len(inlier_pts),
+                residual_mm=thickness * 1e3, scan_idx=scan_idx))
+        return targets
 
     # ── Private helpers ────────────────────────────────────────────────────
     @staticmethod
