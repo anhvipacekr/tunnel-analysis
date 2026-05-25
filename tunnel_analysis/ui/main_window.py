@@ -457,12 +457,37 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._render_target_markers()
             n_sph = sum(1 for t in new_targets if t.type == "sphere")
             n_flt = sum(1 for t in new_targets if t.type == "flat")
+            n_chk = sum(1 for t in new_targets if t.type == "checkerboard")
             n_int = sum(1 for t in new_targets if t.type == "intensity")
-            self._log(f"Target detection: {len(new_targets)} found "
-                      f"(sphere={n_sph}, flat={n_flt}, intensity={n_int})")
+            n_man = sum(1 for t in new_targets if t.type == "manual")
+            # Switch to Targets tab
             for i in range(self.right_tabs.count()):
                 if self.right_tabs.tabText(i) == "Targets":
                     self.right_tabs.setCurrentIndex(i); break
+            # Show result dialog
+            if len(new_targets) == 0:
+                QtWidgets.QMessageBox.warning(self, "Target Detection",
+                    "No targets found." + chr(10) + chr(10) +
+                    "Try adjusting parameters:" + chr(10) +
+                    "- Lower intensity percentile (e.g. 90%)" + chr(10) +
+                    "- Lower min cluster points (e.g. 10)" + chr(10) +
+                    "- Lower min contrast ratio (e.g. 1.2)" + chr(10) +
+                    "- Check if file has intensity/color data")
+                self._log("Target detection: 0 targets found.")
+            else:
+                lines = [f"Found {len(new_targets)} target(s):"]
+                if n_sph: lines.append(f"  Sphere:       {n_sph}")
+                if n_chk: lines.append(f"  Checkerboard: {n_chk}")
+                if n_int: lines.append(f"  Intensity:    {n_int}")
+                if n_man: lines.append(f"  Manual:       {n_man}")
+                lines.append("")
+                lines.append("Targets are shown in the table and marked on 3D viewport.")
+                QtWidgets.QMessageBox.information(self, "Target Detection Complete",
+                    chr(10).join(lines))
+                self._log(f"Target detection: {len(new_targets)} found "
+                          f"(sphere={n_sph}, checkerboard={n_chk}, intensity={n_int})")
+                for t in new_targets:
+                    self._log(f"  [{t.type}] {t.name} conf={t.confidence:.2f} n={t.n_points}")
         elif key == "target_register":
             T, rmse, residuals, reg_pts = result
             if reg_pts is not None:
