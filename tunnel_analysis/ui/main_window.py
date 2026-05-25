@@ -1910,3 +1910,186 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             QDoubleSpinBox, QComboBox { background: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 4px; padding: 4px; color: #111827; }
         """)
 
+
+class _RoughAlignDialog(QtWidgets.QDialog):
+    def __init__(self, context, reg_mod, parent=None, plotter=None):
+        super().__init__(parent)
+        self.setWindowTitle("Rough Alignment")
+        self.setMinimumWidth(480)
+        self.context = context; self.reg_mod = reg_mod
+        self.plotter = plotter; self.offset = [0.0,0.0,0.0]
+        self.rotation = [0.0,0.0,0.0]; self.aligned_pts = None
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.setSpacing(10); lay.setContentsMargins(16,16,16,16)
+        hdr = QtWidgets.QLabel("Adjust scan station position before ICP")
+        hdr.setStyleSheet("color:#0F172A;font-weight:bold;font-size:10pt;")
+        lay.addWidget(hdr)
+        st_lay = QtWidgets.QHBoxLayout()
+        st_lay.addWidget(QtWidgets.QLabel("Active station:"))
+        self._station_combo = QtWidgets.QComboBox()
+        for i, sc in enumerate(self.context.scans):
+            name = "Station " + str(i+1)
+            if sc.path:
+                import pathlib
+                name += " - " + pathlib.Path(sc.path).name
+            self._station_combo.addItem(name)
+        self._station_combo.setCurrentIndex(len(self.context.scans)-1)
+        st_lay.addWidget(self._station_combo, 1); lay.addLayout(st_lay)
+        grp = QtWidgets.QGroupBox("Translation (m) & Rotation (deg)")
+        grp.setStyleSheet("QGroupBox{font-weight:600;color:#0F4C81;border:1px solid #CBD5E1;border-radius:6px;margin-top:8px;padding:8px;}")
+        form = QtWidgets.QFormLayout(grp)
+        self._sliders = {}
+        params = [("dx","dX (m)",-20,20,0),("dy","dY (m)",-20,20,0),("dz","dZ (m)",-20,20,0),
+                  ("rx","Rot X",-180,180,0),("ry","Rot Y",-180,180,0),("rz","Rot Z",-180,180,0)]
+        for key,label,mn,mx,val in params:
+            row = QtWidgets.QHBoxLayout()
+            slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+            slider.setRange(int(mn*100),int(mx*100)); slider.setValue(int(val*100))
+            spin = QtWidgets.QDoubleSpinBox()
+            spin.setRange(mn,mx); spin.setValue(val); spin.setFixedWidth(90)
+            slider.valueChanged.connect(lambda v,s=spin: s.setValue(v/100.0))
+            spin.valueChanged.connect(lambda v,sl=slider: sl.setValue(int(v*100)))
+            spin.valueChanged.connect(self._on_param_changed)
+            row.addWidget(slider,1); row.addWidget(spin)
+            self._sliders[key] = (slider,spin)
+            form.addRow(label, row)
+        lay.addWidget(grp)
+        self._rmse_lbl = QtWidgets.QLabel("RMSE: --")
+        self._rmse_lbl.setStyleSheet("color:#0F4C81;font-weight:bold;font-size:10pt;padding:6px;background:#EFF6FF;border-radius:4px;")
+        lay.addWidget(self._rmse_lbl)
+        btn_lay = QtWidgets.QHBoxLayout()
+        btn_reset = QtWidgets.QPushButton("Reset")
+        btn_icp   = QtWidgets.QPushButton("Run ICP")
+        btn_ok    = QtWidgets.QPushButton("Apply & Close")
+        btn_cancel= QtWidgets.QPushButton("Cancel")
+        for btn,color in [(btn_reset,"#64748B"),(btn_icp,"#7C3AED"),(btn_ok,"#047857"),(btn_cancel,"#DC2626")]:
+            btn.setStyleSheet(f"QPushButton{{background:{color};color:white;border-radius:5px;padding:7px 16px;font-weight:700;border:none;}}")
+        btn_reset.clicked.connect(self._reset); btn_icp.clicked.connect(self._run_icp)
+        btn_ok.clicked.connect(self.accept); btn_cancel.clicked.connect(self.reject)
+        btn_lay.addWidget(btn_reset); btn_lay.addWidget(btn_icp)
+        btn_lay.addStretch(); btn_lay.addWidget(btn_ok); btn_lay.addWidget(btn_cancel)
+        lay.addLayout(btn_lay)
+        self._on_param_changed()
+
+    def _get_params(self):
+        return ([self._sliders[k][1].value() for k in ["dx","dy","dz"]],
+                [self._sliders[k][1].value() for k in ["rx","ry","rz"]])
+
+    def _on_param_changed(self):
+        offset, rotation = self._get_params()
+        self.offset = offset; self.rotation = rotation
+        idx = self._station_combo.currentIndex()
+        if idx < 0 or idx >= len(self.context.scans): return
+        pts = validate_xyz(self.context.scans[idx].points)
+        self.aligned_pts = self.reg_mod.apply_manual_transform(pts, tuple(offset), tuple(rotation))
+        if self.aligned_pts is not None and len(self.context.scans) > 0:
+            ref_idx = max(0, idx-1)
+            ref = validate_xyz(self.context.scans[ref_idx].points)
+            rmse = self.reg_mod._rmse(self.aligned_pts, ref)
+            color = "#047857" if rmse < 2.0 else "#D97706" if rmse < 5.0 else "#DC2626"
+            status = "GOOD" if rmse < 2.0 else "CAUTION" if rmse < 5.0 else "POOR"
+            self._rmse_lbl.setText(f"RMSE vs Station {ref_idx+1}: {rmse:.3f} mm  [{status}]")
+            self._rmse_lbl.setStyleSheet(f"color:{color};font-weight:bold;font-size:10pt;padding:6px;background:#F8FAFC;border-radius:4px;border:1px solid {color};")
+
+    def _run_icp(self):
+        if self.aligned_pts is None: return
+        idx = self._station_combo.currentIndex()
+        ref_idx = max(0, idx-1)
+        ref = validate_xyz(self.context.scans[ref_idx].points)
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        try:
+            reg, rmse = self.reg_mod._icp(self.aligned_pts, ref)
+            self.aligned_pts = reg
+            color = "#047857" if rmse < 2.0 else "#D97706" if rmse < 5.0 else "#DC2626"
+            status = "GOOD" if rmse < 2.0 else "CAUTION" if rmse < 5.0 else "POOR"
+            self._rmse_lbl.setText(f"After ICP: {rmse:.3f} mm  [{status}]")
+            self._rmse_lbl.setStyleSheet(f"color:{color};font-weight:bold;font-size:10pt;padding:6px;background:#F8FAFC;border-radius:4px;border:1px solid {color};")
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+    def _reset(self):
+        for key, (slider, spin) in self._sliders.items():
+            spin.setValue(0.0)
+
+
+class _TargetDetectDialog(QtWidgets.QDialog):
+    def __init__(self, bundle, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Target Detection Settings")
+        self.setMinimumWidth(420)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.setSpacing(10); lay.setContentsMargins(16,16,16,16)
+        has_int = bundle.intensity is not None and float(bundle.intensity.max()) > 0
+        n_pts = len(bundle.points)
+        info = QtWidgets.QLabel("Points: " + str(n_pts) + chr(10) + "Has intensity/color: " + str(has_int))
+        info.setStyleSheet("background:#F0FDF4;border:1px solid #86EFAC;border-radius:4px;padding:6px;color:#166534;font-size:9pt;")
+        lay.addWidget(info)
+        if not has_int:
+            warn = QtWidgets.QLabel("No intensity/color data - sphere and flat detection only.")
+            warn.setStyleSheet("background:#FEF3C7;border:1px solid #FCD34D;border-radius:4px;padding:6px;color:#92400E;font-size:9pt;")
+            lay.addWidget(warn)
+        grp = QtWidgets.QGroupBox("Detection Types")
+        grp.setStyleSheet("QGroupBox{font-weight:600;color:#065F46;border:1px solid #A7F3D0;border-radius:6px;margin-top:8px;padding:8px;}")
+        g_lay = QtWidgets.QVBoxLayout(grp)
+        self._chk_sphere = QtWidgets.QCheckBox("Sphere targets (RANSAC sphere fitting)")
+        self._chk_flat   = QtWidgets.QCheckBox("Flat / Checkerboard targets (plane + FFT)")
+        self._chk_int    = QtWidgets.QCheckBox("Intensity / Color targets (high-reflectance)")
+        self._chk_sphere.setChecked(True)
+        self._chk_flat.setChecked(True)
+        self._chk_int.setChecked(has_int)
+        self._chk_int.setEnabled(has_int)
+        for chk in [self._chk_sphere, self._chk_flat, self._chk_int]:
+            g_lay.addWidget(chk)
+        lay.addWidget(grp)
+        prm = QtWidgets.QGroupBox("Parameters")
+        prm.setStyleSheet("QGroupBox{font-weight:600;color:#065F46;border:1px solid #A7F3D0;border-radius:6px;margin-top:8px;padding:8px;}")
+        p_lay = QtWidgets.QFormLayout(prm)
+        self._sp_r_min = QtWidgets.QDoubleSpinBox()
+        self._sp_r_min.setRange(0.01,0.5); self._sp_r_min.setValue(0.05); self._sp_r_min.setSuffix(" m")
+        self._sp_r_max = QtWidgets.QDoubleSpinBox()
+        self._sp_r_max.setRange(0.05,1.0); self._sp_r_max.setValue(0.25); self._sp_r_max.setSuffix(" m")
+        self._sp_cell_min = QtWidgets.QDoubleSpinBox()
+        self._sp_cell_min.setRange(0.02,0.5); self._sp_cell_min.setValue(0.03); self._sp_cell_min.setSuffix(" m")
+        self._sp_cell_max = QtWidgets.QDoubleSpinBox()
+        self._sp_cell_max.setRange(0.05,1.0); self._sp_cell_max.setValue(0.50); self._sp_cell_max.setSuffix(" m")
+        self._sp_contrast = QtWidgets.QDoubleSpinBox()
+        self._sp_contrast.setRange(1.1,10.0); self._sp_contrast.setValue(1.3); self._sp_contrast.setSingleStep(0.1)
+        self._sp_int_pct = QtWidgets.QDoubleSpinBox()
+        self._sp_int_pct.setRange(80.0,99.9); self._sp_int_pct.setValue(97.0); self._sp_int_pct.setSuffix(" %")
+        self._sp_min_pts = QtWidgets.QSpinBox()
+        self._sp_min_pts.setRange(5,500); self._sp_min_pts.setValue(20); self._sp_min_pts.setSuffix(" pts")
+        p_lay.addRow("Sphere radius min:", self._sp_r_min)
+        p_lay.addRow("Sphere radius max:", self._sp_r_max)
+        p_lay.addRow("Checker cell min:", self._sp_cell_min)
+        p_lay.addRow("Checker cell max:", self._sp_cell_max)
+        p_lay.addRow("Min contrast ratio:", self._sp_contrast)
+        p_lay.addRow("Intensity percentile:", self._sp_int_pct)
+        p_lay.addRow("Min cluster points:", self._sp_min_pts)
+        lay.addWidget(prm)
+        btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        btns.accepted.connect(self.accept); btns.rejected.connect(self.reject)
+        lay.addWidget(btns)
+
+    def get_params(self):
+        return {
+            "detect_sphere":        self._chk_sphere.isChecked(),
+            "detect_flat":          self._chk_flat.isChecked(),
+            "detect_intensity":     self._chk_int.isChecked(),
+            "sphere_radius_range":  (self._sp_r_min.value(), self._sp_r_max.value()),
+            "intensity_percentile": self._sp_int_pct.value(),
+            "min_cluster_pts":      self._sp_min_pts.value(),
+            "cell_size_range":      (self._sp_cell_min.value(), self._sp_cell_max.value()),
+            "min_contrast_ratio":   self._sp_contrast.value(),
+        }
+
+
+def main() -> int:
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    app.setApplicationName("Tunnel Analysis v4.0")
+    win = TunnelAnalysisWindow()
+    win.show()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
