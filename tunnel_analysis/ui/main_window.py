@@ -955,7 +955,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             scan = self.context.active_scan
             pts = scan.points
             intensity = scan.intensity
-            MAX_DET = 300_000
+            MAX_DET = 100_000
             if len(pts) > MAX_DET:
                 step = max(1, len(pts) // MAX_DET)
                 pts_d = pts[::step]

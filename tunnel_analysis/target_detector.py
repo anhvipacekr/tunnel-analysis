@@ -313,36 +313,40 @@ class TargetDetector:
 
     @staticmethod
     def _fast_dbscan(pts: np.ndarray, eps: float, min_pts: int) -> List[np.ndarray]:
-        """Fast DBSCAN using scipy."""
-        if cKDTree is None or len(pts) < min_pts: return []
+        """Fast DBSCAN using sklearn (memory efficient)."""
+        if len(pts) < min_pts: return []
         try:
-            from scipy.cluster.hierarchy import fclusterdata
+            from sklearn.cluster import DBSCAN
+            db = DBSCAN(eps=eps, min_samples=min_pts, algorithm="ball_tree",
+                        n_jobs=-1).fit(pts)
+            labels = db.labels_
+            unique = set(labels) - {-1}
+            return [pts[labels == c] for c in unique
+                    if (labels == c).sum() >= min_pts]
         except ImportError:
             pass
-        # Use scipy cKDTree for neighbor queries
+        # Fallback: simple grid-based clustering
+        if cKDTree is None: return []
         tree = cKDTree(pts)
         n = len(pts)
         labels = np.full(n, -1, dtype=np.int32)
         cluster_id = 0
         visited = np.zeros(n, dtype=bool)
-        # Batch query all neighbors at once
-        neighbors_list = tree.query_ball_tree(tree, eps)
         for i in range(n):
             if visited[i]: continue
-            visited[i] = True
-            nb = neighbors_list[i]
+            nb = tree.query_ball_point(pts[i], eps)
             if len(nb) < min_pts: continue
+            visited[i] = True
             labels[i] = cluster_id
-            stack = list(nb)
+            stack = [j for j in nb if j != i]
             while stack:
                 j = stack.pop()
-                if not visited[j]:
-                    visited[j] = True
-                    nb2 = neighbors_list[j]
-                    if len(nb2) >= min_pts:
-                        stack.extend(nb2)
-                if labels[j] == -1:
-                    labels[j] = cluster_id
+                if visited[j]: continue
+                visited[j] = True
+                labels[j] = cluster_id
+                nb2 = tree.query_ball_point(pts[j], eps)
+                if len(nb2) >= min_pts:
+                    stack.extend([k for k in nb2 if not visited[k]])
             cluster_id += 1
         return [pts[labels == c] for c in range(cluster_id)
                 if (labels == c).sum() >= min_pts]
