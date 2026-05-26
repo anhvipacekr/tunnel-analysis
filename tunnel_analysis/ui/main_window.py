@@ -340,6 +340,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("2.1  Voxel downsampling", self._slot_2_1_voxel),
                 ("2.2  Statistical outlier removal", self._slot_2_2_sor),
                 ("2.3  Extract tunnel lining shell", self._slot_2_3_lining),
+                ("2.4  Semantic noise removal (PDF 3.2)", self._slot_2_4_semantic),
             ]),
             (3, "Registration and synchronization", "Reg.", [
                 ("3.1  Anchor translation", self._slot_3_1_anchor),
@@ -556,6 +557,16 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._log("Review noise in 3D viewport, then use the noise panel to confirm or adjust.")
             self._show_noise_panel()
 
+        elif key == "2.4_semantic":
+            pts, stats = result
+            self.context.normalized_points = pts
+            noise_pts = np.asarray(stats.get("noise_pts", np.empty((0,3))), dtype=np.float64)
+            self._render_filter_result(np.asarray(pts, dtype=np.float64), noise_pts,
+                "2.4 Semantic Noise Removal | kept=blue, removed=red")
+            self.pt_label.setText(f"Points: {len(pts):,}")
+            self.sb_pts.setText(f"Points: {len(pts):,}")
+            self._log(f"Semantic removal: {stats.get('n_clean',len(pts)):,}/{stats.get('n_raw',len(pts)):,} kept")
+            self._log(f"  Cable={stats.get('n_cable',0)} Light={stats.get('n_light',0)} Person={stats.get('n_person',0)}")
         elif key == "2.3_lining":
             pts = np.asarray(result, dtype=np.float64); self.context.normalized_points = pts
             self._render_pts(pts, "2.3 Isolated Tunnel Lining", "#6366F1"); self._log(f"Tunnel lining extraction complete: {len(pts):,} points retained.")
@@ -842,6 +853,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_2_2_sor(self) -> None:
         self._hdr("Statistical Outlier Removal", "Remove environmental noise using distance-statistics filtering.")
         self._start_worker("2.2_sor", lambda: self.pre_mod.statistical_outlier_removal_run(self.context))
+
+    def _slot_2_4_semantic(self) -> None:
+        self._hdr("Semantic Noise Removal (PDF 3.2)",
+                  "Remove cables, lights and people using geometric feature classification.")
+        self._start_worker("2.4_semantic",
+            lambda: self.pre_mod.semantic_noise_removal(self.context))
 
     def _slot_2_3_lining(self) -> None:
         self._hdr("Tunnel Lining Extraction", "Isolate the structural tunnel lining surface for downstream analysis.")
