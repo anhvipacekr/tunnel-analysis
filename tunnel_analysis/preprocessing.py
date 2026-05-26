@@ -21,6 +21,96 @@ class PreprocessingLayer:
         c  = dn.mean(0)
         return dn - c, c
 
+
+    def semantic_noise_removal(
+        self,
+        context: "PipelineContext",
+        k_neighbors: int = 20,
+        cable_linearity_thr: float = 0.30,
+        light_sphericity_thr: float = 0.12,
+        light_size_thr: float = 0.20,
+        person_height_thr: float = 1.2,
+        person_width_thr: float = 0.8,
+    ) -> Tuple[np.ndarray, Dict]:
+        """Semantic noise removal per PDF §3.2.
+        Classify and remove non-structural objects:
+          - Cables/pipes: high linearity (long, thin clusters)
+          - Lights/fixtures: high sphericity (isolated small clusters)
+          - People: human-shaped clusters (~1.7m height, <0.8m width)
+        Uses local geometric features (PCA eigenvalues) per point neighborhood.
+        Returns cleaned points + classification stats.
+        """
+        pts = context.working_points
+        if pts is None: raise RuntimeError("No working_points.")
+        pts = validate_xyz(pts)
+        if cKDTree is None:
+            warnings.warn("scipy required for semantic removal")
+            return pts, {"n_raw": len(pts), "n_clean": len(pts)}
+
+        n = len(pts)
+        k = min(k_neighbors, n - 1)
+        tree = cKDTree(pts)
+        _, idx = tree.query(pts, k=k+1, workers=-1)
+        neighbors = pts[idx[:, 1:]]  # (N, k, 3)
+
+        # Compute local PCA features per point
+        linearity   = np.zeros(n, dtype=np.float64)
+        planarity   = np.zeros(n, dtype=np.float64)
+        sphericity  = np.zeros(n, dtype=np.float64)
+        local_size  = np.zeros(n, dtype=np.float64)
+
+        for i in range(n):
+            nb = neighbors[i]
+            cov = np.cov(nb.T)
+            try:
+                ev = np.sort(np.linalg.eigvalsh(cov))[::-1]  # descending
+                ev = np.clip(ev, 0, None)
+                total = ev.sum() + 1e-9
+                linearity[i]  = (ev[0] - ev[1]) / total
+                planarity[i]  = (ev[1] - ev[2]) / total
+                sphericity[i] = ev[2] / total
+                local_size[i] = float(np.sqrt(ev[0]))
+            except Exception:
+                pass
+
+        # Classify noise
+        is_cable  = linearity >= cable_linearity_thr
+        is_light  = (sphericity >= light_sphericity_thr) & (local_size <= light_size_thr)
+
+        # People detection: cluster high-planarity points, check height/width
+        is_person = np.zeros(n, dtype=bool)
+        person_mask = planarity > 0.4
+        if person_mask.sum() > 10:
+            person_pts = pts[person_mask]
+            from sklearn.cluster import DBSCAN
+            db = DBSCAN(eps=0.15, min_samples=5).fit(person_pts)
+            labels = db.labels_
+            for c in set(labels) - {-1}:
+                mask_c = labels == c
+                cp = person_pts[mask_c]
+                height = float(cp[:, 2].max() - cp[:, 2].min())
+                width  = float(np.ptp(cp[:, :2], axis=0).max())
+                if person_height_thr <= height <= 2.2 and width <= person_width_thr:
+                    # Mark original points near this cluster as person
+                    center = cp.mean(axis=0)
+                    dists  = np.linalg.norm(pts - center, axis=1)
+                    is_person[dists < 0.5] = True
+
+        noise_mask = is_cable | is_light | is_person
+        clean_pts  = validate_xyz(pts[~noise_mask])
+
+        stats = {
+            "n_raw":     n,
+            "n_clean":   int((~noise_mask).sum()),
+            "n_removed": int(noise_mask.sum()),
+            "n_cable":   int(is_cable.sum()),
+            "n_light":   int(is_light.sum()),
+            "n_person":  int(is_person.sum()),
+            "noise_pts": pts[noise_mask].copy(),
+        }
+        return clean_pts, stats
+
+
     @staticmethod
     def _np_voxel(pts: np.ndarray, vs: float) -> np.ndarray:
         pm = pts.min(0)

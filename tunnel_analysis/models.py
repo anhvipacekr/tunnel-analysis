@@ -51,6 +51,8 @@ class PipelineContext:
     polar_angles:       Optional[np.ndarray]     = None
     polar_centers:      Optional[np.ndarray]     = None
     sections:           List[SectionGeometry]    = field(default_factory=list)
+    design_center:      Optional[np.ndarray]     = None   # design axis center (C_design for eccentricity)
+    design_radius:      Optional[float]          = None   # design radius (for polar deformation)
     tunnel_profile:     str                      = "Circle"
 
     @property

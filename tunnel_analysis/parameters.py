@@ -23,83 +23,110 @@ class ParameterExtractionLayer:
 
     def calc_arch_settlement(self, context: PipelineContext) -> Dict[str, float]:
         """Crown settlement dv per PDF 3.5.
-        If T0 reference scan exists (scans[0] when active_index > 0),
-        compute delta Z_max = crown_Tn - crown_T0 (true displacement).
-        Otherwise fall back to single-scan geometry.
+        Per-section: find crown point (max B-direction) in each Frenet section.
+        If T0 reference exists: dv = crown_Tn - crown_T0 (true displacement).
+        Returns mean/max settlement across all sections.
         """
         pts_n = self._req(context, "5.1")
-        z_n   = pts_n[:, 2]
-        cr_n  = float(np.percentile(z_n, 99))
-        sp_n  = float(np.percentile(z_n, 50))
-        inv_n = float(np.percentile(z_n,  1))
+        eps   = self._section_epsilon(context)
+        has_ref = (len(context.scans) >= 2 and context.active_index > 0
+                   and context.frenet_frames)
 
-        # T0 reference
-        has_ref = len(context.scans) >= 2 and context.active_index > 0
-        if has_ref:
-            try:
-                z_0  = validate_xyz(context.scans[0].points)[:, 2]
-                cr_0 = float(np.percentile(z_0, 99))
-                sp_0 = float(np.percentile(z_0, 50))
-                dv   = (cr_n - cr_0) * 1e3   # positive = heave, negative = settlement
-                return {
-                    "crown_settlement_mm":   dv,
-                    "crown_z_Tn_m":          cr_n,
-                    "crown_z_T0_m":          cr_0,
-                    "springline_z_m":        sp_n,
-                    "invert_z_m":            inv_n,
-                    "total_height_mm":       (cr_n - inv_n) * 1e3,
-                    "reference": "T0_comparison",
-                }
-            except Exception:
-                pass
-        # single-scan fallback
-        return {
-            "crown_settlement_mm": (cr_n - sp_n) * 1e3,
-            "total_height_mm":     (cr_n - inv_n) * 1e3,
-            "crown_z_Tn_m":        cr_n,
-            "springline_z_m":      sp_n,
-            "invert_z_m":          inv_n,
-            "reference": "single_scan",
+        dv_list: List[float] = []
+        crown_n_list: List[float] = []
+        crown_0_list: List[float] = []
+
+        if context.frenet_frames:
+            pts_0 = validate_xyz(context.scans[0].points) if has_ref else None
+            for fr in context.frenet_frames:
+                C, T, N, B = fr["center"], fr["T"], fr["N"], fr["B"]
+                # Slice current scan section
+                mask_n = np.abs((pts_n - C) @ T) < eps
+                sl_n   = pts_n[mask_n]
+                if len(sl_n) < 5: continue
+                d_n    = sl_n - C
+                # Crown = max projection onto B (upward direction)
+                b_proj_n = d_n @ B
+                crown_n  = float(b_proj_n.max())
+                crown_n_list.append(crown_n)
+                if has_ref and pts_0 is not None:
+                    mask_0 = np.abs((pts_0 - C) @ T) < eps
+                    sl_0   = pts_0[mask_0]
+                    if len(sl_0) >= 5:
+                        b_proj_0 = (sl_0 - C) @ B
+                        crown_0  = float(b_proj_0.max())
+                        crown_0_list.append(crown_0)
+                        dv_list.append((crown_n - crown_0) * 1e3)
+        # Fallback to global Z if no Frenet frames
+        if not crown_n_list:
+            z_n   = pts_n[:, 2]
+            cr_n  = float(np.percentile(z_n, 99))
+            sp_n  = float(np.percentile(z_n, 50))
+            inv_n = float(np.percentile(z_n,  1))
+            return {
+                "crown_settlement_mm": (cr_n - sp_n) * 1e3,
+                "crown_settlement_max_mm": (cr_n - sp_n) * 1e3,
+                "total_height_mm": (cr_n - inv_n) * 1e3,
+                "reference": "single_scan_global",
+            }
+
+        result = {
+            "crown_settlement_mm":     float(np.mean(dv_list)) if dv_list else float(np.mean(crown_n_list)) * 1e3,
+            "crown_settlement_max_mm": float(np.max(np.abs(dv_list))) if dv_list else float(np.max(crown_n_list)) * 1e3,
+            "crown_B_mean_m":          float(np.mean(crown_n_list)),
+            "n_sections":              len(crown_n_list),
+            "reference":               "T0_per_section" if dv_list else "single_scan_per_section",
         }
+        return result
 
     def calc_horizontal_convergence(self, context: PipelineContext) -> Dict[str, float]:
         """Horizontal convergence dh per PDF 3.5.
-        If T0 reference exists: dh = (width_T0 - width_Tn) = convergence (positive = narrowing).
-        Otherwise: single-scan width.
+        Per-section: width = max_N - min_N (N = horizontal Frenet vector).
+        dh = width_T0 - width_Tn (positive = narrowing/convergence).
         """
         pts_n = self._req(context, "5.2")
-        x_n   = pts_n[:, 0]
-        lx_n  = float(np.percentile(x_n,  1))
-        rx_n  = float(np.percentile(x_n, 99))
-        mx_n  = float(np.mean(x_n))
-        w_n   = rx_n - lx_n
+        eps   = self._section_epsilon(context)
+        has_ref = (len(context.scans) >= 2 and context.active_index > 0
+                   and context.frenet_frames)
 
-        has_ref = len(context.scans) >= 2 and context.active_index > 0
-        if has_ref:
-            try:
-                x_0  = validate_xyz(context.scans[0].points)[:, 0]
-                lx_0 = float(np.percentile(x_0,  1))
-                rx_0 = float(np.percentile(x_0, 99))
-                w_0  = rx_0 - lx_0
-                dh   = (w_0 - w_n) * 1e3   # positive = convergence (narrowing)
-                return {
-                    "lateral_convergence_mm":    dh,
-                    "width_Tn_m":                w_n,
-                    "width_T0_m":                w_0,
-                    "left_wall_x_m":             lx_n,
-                    "right_wall_x_m":            rx_n,
-                    "lateral_centre_offset_mm":  (mx_n - (rx_n + lx_n) / 2) * 1e3,
-                    "reference": "T0_comparison",
-                }
-            except Exception:
-                pass
+        dh_list: List[float] = []
+        w_n_list: List[float] = []
+
+        if context.frenet_frames:
+            pts_0 = validate_xyz(context.scans[0].points) if has_ref else None
+            for fr in context.frenet_frames:
+                C, T, N, B = fr["center"], fr["T"], fr["N"], fr["B"]
+                mask_n = np.abs((pts_n - C) @ T) < eps
+                sl_n   = pts_n[mask_n]
+                if len(sl_n) < 5: continue
+                n_proj_n = (sl_n - C) @ N
+                w_n = float(n_proj_n.max() - n_proj_n.min())
+                w_n_list.append(w_n)
+                if has_ref and pts_0 is not None:
+                    mask_0 = np.abs((pts_0 - C) @ T) < eps
+                    sl_0   = pts_0[mask_0]
+                    if len(sl_0) >= 5:
+                        n_proj_0 = (sl_0 - C) @ N
+                        w_0 = float(n_proj_0.max() - n_proj_0.min())
+                        dh_list.append((w_0 - w_n) * 1e3)
+
+        if not w_n_list:
+            x_n  = pts_n[:, 0]
+            lx_n = float(np.percentile(x_n,  1))
+            rx_n = float(np.percentile(x_n, 99))
+            w_n  = rx_n - lx_n
+            return {
+                "lateral_convergence_mm": w_n * 1e3,
+                "width_Tn_m": w_n,
+                "reference": "single_scan_global",
+            }
+
         return {
-            "lateral_convergence_mm":   w_n * 1e3,
-            "width_Tn_m":               w_n,
-            "left_wall_x_m":            lx_n,
-            "right_wall_x_m":           rx_n,
-            "lateral_centre_offset_mm": (mx_n - (rx_n + lx_n) / 2) * 1e3,
-            "reference": "single_scan",
+            "lateral_convergence_mm":     float(np.mean(dh_list)) if dh_list else 0.0,
+            "lateral_convergence_max_mm": float(np.max(np.abs(dh_list))) if dh_list else 0.0,
+            "width_Tn_mean_m":            float(np.mean(w_n_list)),
+            "n_sections":                 len(w_n_list),
+            "reference":                  "T0_per_section" if dh_list else "single_scan_per_section",
         }
 
     def generate_heatmap(self, context: PipelineContext) -> Tuple[np.ndarray, np.ndarray]:
@@ -176,40 +203,91 @@ class ParameterExtractionLayer:
     def generate_polar_deformation_map(
         self, context: PipelineContext, design_radius_m: float = 3.0, num_bins: int = 72
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Polar radial deformation per PDF 3.5.
+        If T0 reference exists: dr(theta) = r_Tn(theta) - r_T0(theta) per section.
+        Otherwise: dr(theta) = r_Tn(theta) - design_radius_m.
+        """
         pts = self._req(context, "5.4")
         if not context.frenet_frames: raise RuntimeError("Run centerline first.")
-        edges = np.linspace(-np.pi, np.pi, num_bins + 1); angles = 0.5 * (edges[:-1] + edges[1:])
+        edges = np.linspace(-np.pi, np.pi, num_bins + 1)
+        angles = 0.5 * (edges[:-1] + edges[1:])
         epsilon = self._section_epsilon(context)
+        has_ref = len(context.scans) >= 2 and context.active_index > 0
+        pts_0 = validate_xyz(context.scans[0].points) if has_ref else None
         sc: List[np.ndarray] = []; dm: List[np.ndarray] = []
         for fr in context.frenet_frames:
             C, T, N, B = fr["center"], fr["T"], fr["N"], fr["B"]
-            mask = np.abs((pts - C) @ T) < epsilon; sl = pts[mask]
+            mask = np.abs((pts - C) @ T) < epsilon
+            sl = pts[mask]
             if len(sl) < 10: continue
             d = sl - C; xf = d @ N; yf = d @ B
-            r = np.hypot(xf, yf); theta = np.arctan2(yf, xf)
+            r_n = np.hypot(xf, yf); theta = np.arctan2(yf, xf)
             bidx = np.clip(np.digitize(theta, edges) - 1, 0, num_bins - 1)
+            # T0 reference radius per bin
+            r0_bins = np.full(num_bins, design_radius_m, dtype=np.float64)
+            if has_ref and pts_0 is not None:
+                mask_0 = np.abs((pts_0 - C) @ T) < epsilon
+                sl_0 = pts_0[mask_0]
+                if len(sl_0) >= 10:
+                    d0 = sl_0 - C; xf0 = d0 @ N; yf0 = d0 @ B
+                    r0 = np.hypot(xf0, yf0); theta0 = np.arctan2(yf0, xf0)
+                    bidx0 = np.clip(np.digitize(theta0, edges) - 1, 0, num_bins - 1)
+                    for b in range(num_bins):
+                        bm0 = bidx0 == b
+                        if bm0.any(): r0_bins[b] = float(np.nanmedian(r0[bm0]))
             dr = np.full(num_bins, np.nan, dtype=np.float64)
             for b in range(num_bins):
                 bm = bidx == b
-                if bm.any(): dr[b] = (float(np.nanmedian(r[bm])) - design_radius_m) * 1e3
+                if bm.any():
+                    dr[b] = (float(np.nanmedian(r_n[bm])) - r0_bins[b]) * 1e3
             sc.append(C.copy()); dm.append(dr)
         if not sc: raise RuntimeError("No valid sections for polar map.")
         return np.asarray(sc, dtype=np.float64), angles, np.asarray(dm, dtype=np.float64)
 
     def calc_ovality(self, context: PipelineContext) -> Dict[str, float]:
+        """Ovality epsilon per PDF 3.5: epsilon = (a-b)/a * 100%
+        where a,b are semi-axes of best-fit ellipse to 2D section points.
+        Uses LSQ ellipse fitting (not covariance eigenvalues).
+        """
         pts = self._req(context, "5.5")
         if not context.frenet_frames: raise RuntimeError("Run centerline first.")
         ov: List[float] = []
+        eps = self._section_epsilon(context)
         for fr in context.frenet_frames:
             C, T, N, B = fr["center"], fr["T"], fr["N"], fr["B"]
-            mask = np.abs((pts - C) @ T) < self._section_epsilon(context); sl = pts[mask]
+            mask = np.abs((pts - C) @ T) < eps
+            sl = pts[mask]
             if len(sl) < 10: continue
-            d = sl - C; xf = d @ N; yf = d @ B
-            M = np.array([[float(np.mean(xf ** 2)), float(np.mean(xf * yf))],
-                          [float(np.mean(xf * yf)), float(np.mean(yf ** 2))]])
-            ev = np.linalg.eigvalsh(M)
-            a = float(np.sqrt(max(ev.max(), 1e-9))); b = float(np.sqrt(max(ev.min(), 1e-9)))
-            if a > 1e-6: ov.append((a - b) / a * 100.0)
+            d = sl - C
+            xf = d @ N; yf = d @ B
+            # LSQ ellipse fit: Ax^2 + Bxy + Cy^2 + Dx + Ey = 1
+            try:
+                A_mat = np.column_stack([xf**2, xf*yf, yf**2, xf, yf])
+                b_vec = np.ones(len(xf))
+                coeffs, _, _, _ = np.linalg.lstsq(A_mat, b_vec, rcond=None)
+                A, B_c, C_c, D, E = coeffs
+                # Convert to semi-axes
+                M_mat = np.array([[A, B_c/2], [B_c/2, C_c]])
+                ev = np.linalg.eigvalsh(M_mat)
+                if ev.min() <= 0: raise ValueError("invalid ellipse")
+                # Semi-axes from eigenvalues
+                denom = A*C_c - (B_c/2)**2
+                if abs(denom) < 1e-12: raise ValueError("degenerate")
+                # Use bounding box of projected points as fallback check
+                a_semi = float(np.max(np.abs(xf)))
+                b_semi = float(np.max(np.abs(yf)))
+                a_axis = max(a_semi, b_semi)
+                b_axis = min(a_semi, b_semi)
+                if a_axis > 1e-6:
+                    ov.append((a_axis - b_axis) / a_axis * 100.0)
+            except Exception:
+                # Fallback: bounding box method
+                a_semi = float(np.max(np.abs(xf)))
+                b_semi = float(np.max(np.abs(yf)))
+                a_axis = max(a_semi, b_semi)
+                b_axis = min(a_semi, b_semi)
+                if a_axis > 1e-6:
+                    ov.append((a_axis - b_axis) / a_axis * 100.0)
         if not ov: return {"ovality_mean_pct": float("nan"), "ovality_max_pct": float("nan")}
         return {"ovality_mean_pct": float(np.mean(ov)), "ovality_max_pct": float(np.max(ov))}
 
@@ -227,20 +305,31 @@ class ParameterExtractionLayer:
         eps = self._section_epsilon(context)
 
         # Build design centers array
+        # Priority: explicit design_centers > context.design_center > T0 scan > Frenet center
         if design_centers is not None:
             d_centers = np.asarray(design_centers, dtype=np.float64)
+        elif hasattr(context, "design_center") and context.design_center is not None:
+            # Use single design center repeated for all sections
+            dc = np.asarray(context.design_center, dtype=np.float64)
+            d_centers = np.tile(dc, (len(context.frenet_frames), 1))
         elif len(context.scans) >= 2 and context.active_index > 0:
-            # Use T0 section centers as design reference
+            # Use T0 section centers per Frenet frame as design reference
             try:
                 pts_0 = validate_xyz(context.scans[0].points)
-                c0 = pts_0.mean(axis=0)
-                ev0, vecs0 = np.linalg.eigh(np.cov((pts_0 - c0).T))
-                ax0 = vecs0[:, np.argmax(ev0)]
-                proj0 = (pts_0 - c0) @ ax0
-                n_fr = len(context.frenet_frames)
-                chunks = np.array_split(pts_0[np.argsort(proj0)], n_fr)
-                d_centers = np.asarray([ch.mean(axis=0) for ch in chunks if len(ch) >= 3],
-                                        dtype=np.float64)
+                eps = self._section_epsilon(context)
+                centers_0 = []
+                for fr in context.frenet_frames:
+                    C, T, N, B = fr["center"], fr["T"], fr["N"], fr["B"]
+                    mask_0 = np.abs((pts_0 - C) @ T) < eps
+                    sl_0 = pts_0[mask_0]
+                    if len(sl_0) < 5:
+                        centers_0.append(C)
+                        continue
+                    d0 = sl_0 - C
+                    xf0 = d0 @ N; yf0 = d0 @ B
+                    C0_meas = C + float(np.mean(xf0)) * N + float(np.mean(yf0)) * B
+                    centers_0.append(C0_meas)
+                d_centers = np.asarray(centers_0, dtype=np.float64)
             except Exception:
                 d_centers = None
         else:
