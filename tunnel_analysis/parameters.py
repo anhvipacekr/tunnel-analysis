@@ -389,16 +389,39 @@ class ParameterExtractionLayer:
 
     @staticmethod
     def _wall_angle(pts2d: np.ndarray, side: str = "left") -> float:
+        """Wall angle = angle between wall and floor (horizontal ground).
+        Per PDF 3.5: measured from horizontal (0 deg = vertical wall, 90 deg = flat floor).
+        Uses PCA on wall points to find wall direction vector.
+        """
         x = pts2d[:, 0]; z = pts2d[:, 1]
+        z_min = float(np.percentile(z, 5))
+        z_max = float(np.percentile(z, 95))
+        z_mid = (z_min + z_max) / 2.0
+        # Select wall points: side region, middle height range (exclude floor/crown)
         if side == "left":
-            mask = x < float(np.percentile(x, 25))
+            x_mask = x < float(np.percentile(x, 30))
         else:
-            mask = x > float(np.percentile(x, 75))
+            x_mask = x > float(np.percentile(x, 70))
+        # Focus on middle 60% height = wall region
+        z_mask = (z > z_min + (z_max - z_min) * 0.15) & (z < z_min + (z_max - z_min) * 0.85)
+        mask = x_mask & z_mask
         wp = pts2d[mask]
         if len(wp) < 4: return float("nan")
         try:
-            coeffs = np.polyfit(wp[:, 1], wp[:, 0], 1) 
-            return math.degrees(math.atan(abs(float(coeffs[0]))))
+            # PCA to find wall direction
+            c = wp.mean(axis=0)
+            cov = np.cov((wp - c).T)
+            ev, vecs = np.linalg.eigh(cov)
+            # Principal direction = wall line direction
+            wall_dir = vecs[:, np.argmax(ev)]  # [dx, dz]
+            # wall_dir = [dx, dz] principal direction of wall
+            # angle from horizontal ground = angle between wall_dir and X-axis
+            # atan2(dz, dx): 0=horizontal, 90=vertical
+            # For wall: we want angle between wall and floor
+            # vertical wall: wall_dir ~ [0,1] -> angle = 90 deg from floor
+            # inclined wall: wall_dir ~ [sin(a), cos(a)] -> angle = 90-a from floor
+            angle_from_floor = math.degrees(math.atan2(abs(wall_dir[1]), abs(wall_dir[0])))
+            return angle_from_floor
         except Exception:
             return float("nan")
 
