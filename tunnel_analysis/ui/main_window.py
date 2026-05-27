@@ -2336,6 +2336,20 @@ class _TargetDetectDialog(QtWidgets.QDialog):
         }
 
 
+    def closeEvent(self, event) -> None:
+        """Clean up timers and threads before closing."""
+        try:
+            if hasattr(self, "_anim_timer") and self.section_widget:
+                self.section_widget._anim_timer.stop()
+        except Exception: pass
+        try:
+            if self.worker_thread and self.worker_thread.isRunning():
+                self.worker_thread.quit()
+                self.worker_thread.wait(1000)
+        except Exception: pass
+        event.accept()
+
+
 def main() -> int:
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     app.setApplicationName("Tunnel Analysis v4.0")

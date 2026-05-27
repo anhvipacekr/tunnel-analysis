@@ -6,6 +6,13 @@ import logging
 os.environ["VTK_SILENCE_GET_VOID_POINTER_WARNINGS"] = "1"
 os.environ["PYVISTA_OFF_SCREEN"] = "false"
 
+# Use HuggingFace offline mode to suppress token warning
+# Models are cached locally after first download
+import os
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "0")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "0")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 # Prevent recursive WARNING:root: loop in PyVista VTK error handler
 logging.getLogger("root").setLevel(logging.CRITICAL)
 logging.getLogger("pyvista").setLevel(logging.ERROR)
