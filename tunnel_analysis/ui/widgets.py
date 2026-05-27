@@ -75,17 +75,17 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         self._btn_prev.setMinimumWidth(80)
         self._btn_next.setMinimumWidth(80)
         self._btn_reset.setMinimumWidth(110)
-        self._btn_reset.setToolTip("Reset zoom to fit section")
         self._btn_reset.setToolTip("Reset zoom (R)")
         self._btn_info = QtWidgets.QPushButton("\u24d8 Info")
-            "QPushButton{background:#047857;color:white;border-radius:5px;"
-            "padding:5px 12px;font-weight:700;font-size:10pt;border:none;}"
-            "QPushButton:hover{background:#065F46;}")
-        self._btn_info.setMinimumWidth(60)
+        self._btn_info.setStyleSheet(expand_style)
+        self._btn_info.setMinimumWidth(55)
         self._btn_info.setToolTip("Show section parameters")
         self._current_sg = None
-        self._current_sg = None
         self._lbl_ch = QtWidgets.QLabel("Ch: --")
+        self._lbl_ch.setAlignment(QtCore.Qt.AlignCenter)
+        self._lbl_ch.setStyleSheet("color:white;font-weight:bold;font-size:10pt;background:transparent;min-width:100px;")
+        self._btn_prev.clicked.connect(self._prev)
+        self._btn_next.clicked.connect(self._next)
         self._lbl_ch.setAlignment(QtCore.Qt.AlignCenter)
         self._lbl_ch.setStyleSheet("color:white;font-weight:bold;font-size:10pt;background:transparent;min-width:100px;")
         self._btn_next.clicked.connect(self._next)
