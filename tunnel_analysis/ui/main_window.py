@@ -365,6 +365,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("5.5  Ovality epsilon", self._slot_5_5_ovality),
                 ("5.6  Section eccentricity e", self._slot_5_6_eccentricity),
                 ("5.7  Plot 2D Technical Section", self._slot_5_7_sections),
+                ("5.8  Clearance 3D violation map", self._slot_5_8_clearance_3d),
             ]),
             (6, "Time-series analysis", "T-S", [
                 ("6.1  Load T0 and Tn epochs", self._slot_6_1_epochs),
@@ -652,6 +653,36 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self.polar_plot.update_data(angles, dmap); self.right_tabs.setCurrentIndex(4)
             self._log(f"Polar radial deformation map generated: max outward={mx:+.2f} mm, max inward={mn:+.2f} mm")
 
+        elif key == "5.8_clearance_3d":
+            pts, colors, n_viol = result
+            mesh = make_vertex_cloud(pts)
+            if self.plotter is not None:
+                self.plotter.clear(); self.plotter.set_background("#F8FAFC")
+                self.plotter.add_mesh(mesh, scalars=None, style="points",
+                    point_size=2.5, render_points_as_spheres=False,
+                    reset_camera=True, color="#94A3B8")
+                # Highlight violation points in red
+                if len(colors):
+                    viol_pts = pts[colors]
+                    if len(viol_pts):
+                        viol_mesh = make_vertex_cloud(viol_pts)
+                        self.plotter.add_mesh(viol_mesh, color="#DC2626",
+                            style="points", point_size=6.0,
+                            render_points_as_spheres=True,
+                            reset_camera=False, name="clearance_viol")
+                self.plotter.add_text(
+                    f"Clearance Violations: {n_viol} points",
+                    position="upper_left", font_size=11,
+                    color="#DC2626" if n_viol > 0 else "#047857",
+                    name="ttl")
+                self.plotter.add_axes(color="#111827")
+                self.plotter.reset_camera(); self.plotter.render()
+            self._log(f"Clearance 3D map: {n_viol} violation points detected")
+            if n_viol > 0:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Clearance Violation",
+                    f"{n_viol} points violate vehicle clearance envelope!" + chr(10) +
+                    "Red points shown on 3D viewport.")
         elif key == "5.7_sections":
             sections: List[SectionGeometry] = result; self.context.sections = sections
             self.section_widget.set_sections(sections, profile=self.context.tunnel_profile, vl_box_w=self._sp_vl_w.value(), vl_box_h=self._sp_vl_h.value(), vl_cir_r=self._sp_vl_r.value())
@@ -930,8 +961,14 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._on_auto_pipeline_done()
             return
         key, task, msg = self._auto_steps[self._auto_step]
-        self._log(msg)
-        self.sb_msg.setText(msg)
+        total = len(self._auto_steps)
+        pct = int(self._auto_step / total * 100)
+        self.sb_prog.setValue(pct)
+        step_label = f"[{self._auto_step+1}/{total}] {msg}"
+        self._log(step_label)
+        self.sb_msg.setText(step_label)
+        if hasattr(self, "_auto_btn"):
+            self._auto_btn.setText(f"Running... {pct}%  ({self._auto_step+1}/{total})")
         self._start_worker(key, task)
 
     def _on_auto_pipeline_done(self) -> None:
@@ -1328,6 +1365,30 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_5_6_eccentricity(self) -> None:
         self._hdr("Section Eccentricity", "Calculate measured center offset relative to the design center.")
         self._start_worker("5.6_eccentricity", lambda: self.par_mod.calc_eccentricity(self.context))
+
+    def _slot_5_8_clearance_3d(self) -> None:
+        self._hdr("Clearance 3D Violation Map (PDF 3.6)",
+                  "Highlight points violating vehicle clearance envelope on 3D viewport.")
+        if not self.context.sections:
+            self._log("Run Step 5.7 first."); return
+        def _task():
+            import numpy as _np
+            pts = self.context.working_points
+            if pts is None: raise RuntimeError("No point cloud.")
+            pts = validate_xyz(pts)
+            # Get clearance violations from sections
+            viol_centers = [s.center_3d for s in self.context.sections
+                            if s.clearance_violation and s.center_3d is not None]
+            if not viol_centers:
+                return pts, _np.zeros(len(pts), dtype=bool), 0
+            # Mark points near violation section centers
+            from scipy.spatial import cKDTree as _kd
+            viol_arr = _np.array(viol_centers)
+            tree = _kd(viol_arr)
+            d, _ = tree.query(pts, k=1, workers=-1)
+            viol_mask = d < 0.5
+            return pts, viol_mask, int(viol_mask.sum())
+        self._start_worker("5.8_clearance_3d", _task)
 
     def _slot_5_7_sections(self) -> None:
         self._hdr("Plot 2D Technical Section", "Display flat 2D engineering cross-sections with vehicle clearance limits.")

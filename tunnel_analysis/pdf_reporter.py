@@ -61,6 +61,11 @@ class TunnelPDFReporter:
         if context.sections:
             self._draw_section_plots(c, W, H, context)
 
+        # ---- Section data table ----
+        if context.sections:
+            self._draw_section_table(c, W, H, context, project_name)
+            c.showPage()
+
         # ── Last page: Warnings ────────────────────────────────────────────
         self._draw_warnings(c, W, H, context, project_name)
         c.showPage()
@@ -229,6 +234,38 @@ class TunnelPDFReporter:
         c.showPage()
 
     # ------------------------------------------------------- Warnings page --
+
+    def _draw_section_table(self, c, W, H, context, project_name):
+        """Per-section parameters table page."""
+        import numpy as _np
+        self._draw_page_header(c, W, H, "SECTION DATA TABLE", project_name)
+        y = H - 110
+        col_w = [50, 50, 50, 50, 55, 55, 50, 45]
+        headers = ["Ch(m)","H1(m)","W1(m)","Oval(%)","Ecc(mm)","R_fit(m)","Clr(m)","Status"]
+        self._draw_table_row(c, 15, y, col_w, headers, header=True); y -= 16
+        for sec in context.sections:
+            if y < 60:
+                self._draw_footer(c, W, 3, project_name)
+                c.showPage()
+                self._draw_page_header(c, W, H, "SECTION DATA TABLE (cont.)", project_name)
+                y = H - 110
+                self._draw_table_row(c, 15, y, col_w, headers, header=True); y -= 16
+            clr = f"{sec.min_clearance_dist:.3f}" if _np.isfinite(sec.min_clearance_dist) else "-"
+            status = "VIOL" if sec.clearance_violation else "OK"
+            sc = self.C_RED if sec.clearance_violation else None
+            vals = [
+                f"{sec.chainage:.2f}",
+                f"{sec.H1:.3f}" if _np.isfinite(sec.H1) else "-",
+                f"{sec.W1:.3f}" if _np.isfinite(sec.W1) else "-",
+                f"{sec.ovality:.2f}" if _np.isfinite(sec.ovality) else "-",
+                f"{sec.eccentricity:.1f}" if _np.isfinite(sec.eccentricity) else "-",
+                f"{sec.radius_fit:.3f}" if _np.isfinite(sec.radius_fit) else "-",
+                clr, status,
+            ]
+            self._draw_table_row(c, 15, y, col_w, vals, status_color=sc)
+            y -= 14
+        self._draw_footer(c, W, 3, project_name)
+
     def _draw_warnings(self, c, W, H, context, project_name):
         self._draw_page_header(c, W, H, "STRUCTURAL WARNINGS", project_name)
         y = H - 110

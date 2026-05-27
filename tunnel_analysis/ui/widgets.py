@@ -88,6 +88,30 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         nav.addWidget(self._btn_reset)
         lay.addWidget(nav_frame)
 
+        # Section slider
+        slider_frame = QtWidgets.QFrame()
+        slider_frame.setStyleSheet("QFrame{background:#F1F5F9;border-bottom:1px solid #E2E8F0;padding:2px;}")
+        slider_lay = QtWidgets.QHBoxLayout(slider_frame)
+        slider_lay.setContentsMargins(8, 2, 8, 2); slider_lay.setSpacing(6)
+        lbl_slider = QtWidgets.QLabel("Ch:")
+        lbl_slider.setStyleSheet("color:#475569;font-size:8.5pt;")
+        self._slider_ch = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self._slider_ch.setRange(0, 0)
+        self._slider_ch.setValue(0)
+        self._slider_ch.setTickPosition(QtWidgets.QSlider.TicksBelow)
+        self._slider_ch.setStyleSheet(
+            "QSlider::groove:horizontal{height:4px;background:#CBD5E1;border-radius:2px;}"
+            "QSlider::handle:horizontal{width:14px;height:14px;background:#0F4C81;"
+            "border-radius:7px;margin:-5px 0;}"
+            "QSlider::handle:horizontal:hover{background:#1D4ED8;}")
+        self._slider_ch.valueChanged.connect(self._on_slider_changed)
+        self._lbl_slider_val = QtWidgets.QLabel("--")
+        self._lbl_slider_val.setStyleSheet("color:#0F4C81;font-size:8.5pt;font-weight:600;min-width:60px;")
+        slider_lay.addWidget(lbl_slider)
+        slider_lay.addWidget(self._slider_ch, 1)
+        slider_lay.addWidget(self._lbl_slider_val)
+        lay.addWidget(slider_frame)
+
         if _MPL_OK:
             self._fig = Figure(figsize=(7.5, 6.5), facecolor=_BG)
             self._ax  = self._fig.add_subplot(111)
@@ -176,6 +200,15 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                                         self._vl_cir_r, parent=self)
         dlg.exec()
 
+    def _on_slider_changed(self, value: int) -> None:
+        if not self._sections: return
+        if value != self._idx:
+            self._idx = value
+            self._refresh()
+        if hasattr(self, "_lbl_slider_val") and self._sections:
+            sg = self._sections[self._idx]
+            self._lbl_slider_val.setText(f"{sg.chainage:.2f}m")
+
     def _prev(self) -> None:
         if not self._sections: return
         self._idx = (self._idx - 1) % len(self._sections); self._refresh()
@@ -192,6 +225,9 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
     def set_sections(self, sections: List[SectionGeometry], profile: str, vl_box_w: float, vl_box_h: float, vl_cir_r: float) -> None:
         self._sections = sections; self._idx = 0; self._profile = profile
         self._vl_box_w = vl_box_w; self._vl_box_h = vl_box_h; self._vl_cir_r = vl_cir_r
+        if hasattr(self, "_slider_ch") and sections:
+            self._slider_ch.setRange(0, len(sections) - 1)
+            self._slider_ch.setValue(0)
         self._refresh()
 
     def _draw_empty(self) -> None:
@@ -206,6 +242,12 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         if not _MPL_OK or not self._sections: self._draw_empty(); return
         sg = self._sections[self._idx]
         self._lbl_ch.setText(f"Chainage: {sg.chainage:.2f} m  ({self._idx + 1}/{len(self._sections)})")
+        if hasattr(self, "_slider_ch"):
+            self._slider_ch.blockSignals(True)
+            self._slider_ch.setValue(self._idx)
+            self._slider_ch.blockSignals(False)
+        if hasattr(self, "_lbl_slider_val"):
+            self._lbl_slider_val.setText(f"{sg.chainage:.2f}m")
         self.section_changed.emit(self._idx)
         if sg.pts_2d is None or len(sg.pts_2d) < 4: self._draw_empty(); return
         ref_sg = None
