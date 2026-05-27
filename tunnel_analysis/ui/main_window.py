@@ -918,7 +918,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _init_rag(self) -> None:
         msg = self.rag_mod.initialize()
-        self._log(f"[RAG] {msg}")
+        # Use QTimer to log after UI is fully built
+        try:
+            QtCore.QTimer.singleShot(500, lambda: self._log(f"[RAG] {msg}"))
+        except Exception:
+            pass
 
     def _slot_auto_pipeline(self) -> None:
         """Run full analysis pipeline in sequence: voxel -> SOR -> lining -> centerline -> params -> sections."""

@@ -198,6 +198,61 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         self._ax.set_aspect("equal", adjustable="box")
         self._canvas.draw_idle()
 
+    def _show_info_dialog(self) -> None:
+        """Show section parameters in clean readable dialog."""
+        sg = getattr(self, "_current_sg", None)
+        if sg is None:
+            if not self._sections: return
+            sg = self._sections[self._idx]
+        import numpy as _np
+        dlg = QtWidgets.QDialog(self.parent() if self.parent() else self)
+        dlg.setWindowTitle("Section Info  |  Ch. " + f"{sg.chainage:.3f} m")
+        dlg.setMinimumWidth(380)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lay.setSpacing(0); lay.setContentsMargins(0,0,0,0)
+        hdr = QtWidgets.QFrame()
+        hdr.setStyleSheet("QFrame{background:#0F4C81;padding:10px;}")
+        hl = QtWidgets.QVBoxLayout(hdr); hl.setContentsMargins(16,10,16,10)
+        t1 = QtWidgets.QLabel("Chainage: " + f"{sg.chainage:.3f} m")
+        t1.setStyleSheet("color:white;font-size:14pt;font-weight:bold;background:transparent;")
+        t2 = QtWidgets.QLabel("Profile: " + self._profile)
+        t2.setStyleSheet("color:#CBD5E1;font-size:10pt;background:transparent;")
+        hl.addWidget(t1); hl.addWidget(t2); lay.addWidget(hdr)
+        grid = QtWidgets.QWidget()
+        grid.setStyleSheet("QWidget{background:#F8FAFC;}")
+        gl = QtWidgets.QGridLayout(grid)
+        gl.setContentsMargins(16,12,16,12); gl.setSpacing(8)
+        rows = [
+            ("Clear Height H1", f"{sg.H1:.4f} m" if _np.isfinite(sg.H1) else "N/A"),
+            ("Clear Width W1",  f"{sg.W1:.4f} m" if _np.isfinite(sg.W1) else "N/A"),
+            ("Fitted Radius R", f"{sg.radius_fit:.4f} m" if _np.isfinite(sg.radius_fit) else "N/A"),
+            ("Ovality epsilon", f"{sg.ovality:.4f} %" if _np.isfinite(sg.ovality) else "N/A"),
+            ("Eccentricity e",  f"{sg.eccentricity:.2f} mm" if _np.isfinite(sg.eccentricity) else "N/A"),
+            ("Min Clearance",   f"{sg.min_clearance_dist:.4f} m" if _np.isfinite(sg.min_clearance_dist) else "N/A"),
+            ("Wall Angle L",    f"{sg.wall_angle_L:.2f} deg" if _np.isfinite(sg.wall_angle_L) else "N/A"),
+            ("Wall Angle R",    f"{sg.wall_angle_R:.2f} deg" if _np.isfinite(sg.wall_angle_R) else "N/A"),
+        ]
+        for i,(lbl,val) in enumerate(rows):
+            l = QtWidgets.QLabel(lbl)
+            l.setStyleSheet("color:#64748B;font-size:10pt;font-weight:600;")
+            v = QtWidgets.QLabel(val)
+            v.setStyleSheet("color:#0F172A;font-size:11pt;font-weight:bold;font-family:monospace;")
+            gl.addWidget(l, i, 0); gl.addWidget(v, i, 1, QtCore.Qt.AlignRight)
+        lay.addWidget(grid)
+        sf = QtWidgets.QFrame()
+        bg = "#FEE2E2" if sg.clearance_violation else "#D1FAE5"
+        bc = "#DC2626" if sg.clearance_violation else "#047857"
+        sf.setStyleSheet(f"QFrame{{background:{bg};border-top:2px solid {bc};padding:8px;}}")
+        sl = QtWidgets.QHBoxLayout(sf); sl.setContentsMargins(16,8,16,8)
+        st = "CLEARANCE VIOLATION" if sg.clearance_violation else "OK - Within Limits"
+        slbl = QtWidgets.QLabel(st)
+        slbl.setStyleSheet(f"color:{bc};font-size:12pt;font-weight:bold;background:transparent;")
+        sl.addWidget(slbl); lay.addWidget(sf)
+        btn = QtWidgets.QPushButton("Close")
+        btn.setStyleSheet("QPushButton{background:#0F4C81;color:white;border-radius:0;padding:10px;font-weight:700;font-size:10pt;border:none;}QPushButton:hover{background:#1D4ED8;}")
+        btn.clicked.connect(dlg.accept); lay.addWidget(btn)
+        dlg.exec()
+
     def _open_fullscreen(self) -> None:
         """Open current section in a resizable full-screen dialog."""
         if not self._sections or not _MPL_OK:
