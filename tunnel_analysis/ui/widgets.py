@@ -384,7 +384,68 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         pt_alpha = max(0.3, min(0.75, 0.35 + 0.40 * alpha))
         ax.scatter(x, z, c=final_colors, s=2.2, alpha=pt_alpha,
                    linewidths=0, rasterized=True, zorder=2)
+        # PDF params overlay
+        # ── δv Crown settlement arrow ──────────────────────────────────────
+        if hasattr(sg, "H1") and np.isfinite(sg.H1):
+            crown_z = float(np.percentile(z, 97))
+            spring_z = float(np.percentile(z, 50))
+            dv_mm = (crown_z - spring_z) * 1e3
+            # Arrow at crown pointing down
+            ax.annotate("", xy=(0, crown_z), xytext=(0, crown_z + 0.3),
+                arrowprops=dict(arrowstyle="->", color="#DC2626", lw=2.0),
+                zorder=9)
+            ax.text(0.05, crown_z + 0.35, f"δv={dv_mm:.0f}mm",
+                color="#DC2626", fontsize=8, fontweight="bold",
+                bbox=dict(facecolor="white", edgecolor="#DC2626",
+                          boxstyle="round,pad=0.2", alpha=0.9), zorder=10)
+
+        # ── δh Convergence arrows ───────────────────────────────────────────
+        if hasattr(sg, "W1") and np.isfinite(sg.W1):
+            mid_z = float(np.percentile(z, 50))
+            left_x  = float(np.percentile(x, 2))
+            right_x = float(np.percentile(x, 98))
+            dh_mm = (right_x - left_x) * 1e3
+            # Left arrow pointing right
+            ax.annotate("", xy=(left_x + 0.25, mid_z),
+                xytext=(left_x, mid_z),
+                arrowprops=dict(arrowstyle="->", color="#1D4ED8", lw=2.0), zorder=9)
+            # Right arrow pointing left
+            ax.annotate("", xy=(right_x - 0.25, mid_z),
+                xytext=(right_x, mid_z),
+                arrowprops=dict(arrowstyle="->", color="#1D4ED8", lw=2.0), zorder=9)
+            ax.text(0.0, mid_z + 0.15, f"δh={dh_mm:.0f}mm",
+                color="#1D4ED8", fontsize=8, fontweight="bold", ha="center",
+                bbox=dict(facecolor="white", edgecolor="#1D4ED8",
+                          boxstyle="round,pad=0.2", alpha=0.9), zorder=10)
+
+        # ── e Eccentricity: measured center dot ─────────────────────────────
+        cx_meas = float(np.mean(x)); cz_meas = float(np.mean(z))
+        ax.plot(cx_meas, cz_meas, "D", color="#7C3AED", ms=7, zorder=10,
+                label=f"C_meas")
+        ax.plot(0, 0, "+", color="#64748B", ms=10, mew=2, zorder=10,
+                label="C_design")
+        ecc_mm = np.sqrt(cx_meas**2 + cz_meas**2) * 1e3
+        if ecc_mm > 1.0:
+            ax.plot([0, cx_meas], [0, cz_meas], "--",
+                color="#7C3AED", lw=1.2, alpha=0.7, zorder=8)
+            ax.text(cx_meas/2, cz_meas/2 + 0.1, f"e={ecc_mm:.0f}mm",
+                color="#7C3AED", fontsize=7.5, ha="center",
+                bbox=dict(facecolor="white", edgecolor="#7C3AED",
+                          boxstyle="round,pad=0.15", alpha=0.85), zorder=10)
+
+        # ── ε Ovality: show fitted ellipse ──────────────────────────────────
+        if hasattr(sg, "ovality") and np.isfinite(sg.ovality) and sg.ovality > 0.1:
+            a_semi = float(np.max(np.abs(x)))
+            b_semi = float(np.max(np.abs(z)))
+            if a_semi > 0.1 and b_semi > 0.1:
+                theta_e = np.linspace(0, 2*np.pi, 100)
+                ex = a_semi * np.cos(theta_e)
+                ez = b_semi * np.sin(theta_e)
+                ax.plot(ex, ez, "--", color="#D97706", lw=1.2, alpha=0.6,
+                        zorder=3, label=f"ε={sg.ovality:.1f}%")
+
         # T0 reference overlay
+
         if ref_sg is not None and ref_sg.pts_2d is not None and len(ref_sg.pts_2d) >= 4:
             rx = ref_sg.pts_2d[:, 0]; rz = ref_sg.pts_2d[:, 1]
             ref_alpha = max(0.15, 0.55 * (1.0 - alpha))
