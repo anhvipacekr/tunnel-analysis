@@ -222,22 +222,74 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         grid.setStyleSheet("QWidget{background:#F8FAFC;}")
         gl = QtWidgets.QGridLayout(grid)
         gl.setContentsMargins(16,12,16,12); gl.setSpacing(8)
+        # (label, value, tooltip/description)
         rows = [
-            ("Clear Height H1", f"{sg.H1:.4f} m" if _np.isfinite(sg.H1) else "N/A"),
-            ("Clear Width W1",  f"{sg.W1:.4f} m" if _np.isfinite(sg.W1) else "N/A"),
-            ("Fitted Radius R", f"{sg.radius_fit:.4f} m" if _np.isfinite(sg.radius_fit) else "N/A"),
-            ("Ovality epsilon", f"{sg.ovality:.4f} %" if _np.isfinite(sg.ovality) else "N/A"),
-            ("Eccentricity e",  f"{sg.eccentricity:.2f} mm" if _np.isfinite(sg.eccentricity) else "N/A"),
-            ("Min Clearance",   f"{sg.min_clearance_dist:.4f} m" if _np.isfinite(sg.min_clearance_dist) else "N/A"),
-            ("Wall Angle L",    f"{sg.wall_angle_L:.2f} deg" if _np.isfinite(sg.wall_angle_L) else "N/A"),
-            ("Wall Angle R",    f"{sg.wall_angle_R:.2f} deg" if _np.isfinite(sg.wall_angle_R) else "N/A"),
+            ("H1  Clear Height",
+             f"{sg.H1:.4f} m" if _np.isfinite(sg.H1) else "N/A",
+             "Vertical clearance from floor to crown (total internal height)"),
+            ("W1  Clear Width",
+             f"{sg.W1:.4f} m" if _np.isfinite(sg.W1) else "N/A",
+             "Horizontal clearance between left and right walls (internal width)"),
+            ("H2  Crown Height",
+             f"{sg.H2:.4f} m" if _np.isfinite(sg.H2) else "N/A",
+             "Height from springline to crown (upper arch height)"),
+            ("H3  Invert Height",
+             f"{sg.H3:.4f} m" if _np.isfinite(sg.H3) else "N/A",
+             "Height from floor to springline (lower section height)"),
+            ("W2  Base Width",
+             f"{sg.W2:.4f} m" if _np.isfinite(sg.W2) else "N/A",
+             "Width at floor level (base width)"),
+            ("R   Fitted Radius",
+             f"{sg.radius_fit:.4f} m" if _np.isfinite(sg.radius_fit) else "N/A",
+             "Best-fit circle radius to section points (design radius comparison)"),
+            ("epsilon  Ovality",
+             f"{sg.ovality:.4f} %" if _np.isfinite(sg.ovality) else "N/A",
+             "Shape distortion: (a-b)/a x 100% where a=major, b=minor semi-axis. Caution>0.5%, Critical>1.0%"),
+            ("e  Eccentricity",
+             f"{sg.eccentricity:.2f} mm" if _np.isfinite(sg.eccentricity) else "N/A",
+             "Distance between measured center and design center |C_meas - C_design|. Caution>10mm, Critical>25mm"),
+            ("Clearance Min",
+             f"{sg.min_clearance_dist:.4f} m" if _np.isfinite(sg.min_clearance_dist) else "N/A",
+             "Minimum distance from tunnel surface to vehicle clearance envelope. Negative = violation"),
+            ("Angle L  Wall-Floor",
+             f"{sg.wall_angle_L:.2f} deg" if _np.isfinite(sg.wall_angle_L) else "N/A",
+             "Angle between left wall and floor (90 deg = perfectly vertical wall)"),
+            ("Angle R  Wall-Floor",
+             f"{sg.wall_angle_R:.2f} deg" if _np.isfinite(sg.wall_angle_R) else "N/A",
+             "Angle between right wall and floor (90 deg = perfectly vertical wall)"),
         ]
-        for i,(lbl,val) in enumerate(rows):
+        for i,(lbl,val,tip) in enumerate(rows):
+            # Label with tooltip
             l = QtWidgets.QLabel(lbl)
-            l.setStyleSheet("color:#64748B;font-size:10pt;font-weight:600;")
+            l.setStyleSheet("color:#64748B;font-size:9.5pt;font-weight:600;")
+            l.setToolTip(tip)
+            # Value
             v = QtWidgets.QLabel(val)
-            v.setStyleSheet("color:#0F172A;font-size:11pt;font-weight:bold;font-family:monospace;")
-            gl.addWidget(l, i, 0); gl.addWidget(v, i, 1, QtCore.Qt.AlignRight)
+            warn = False
+            if "Ovality" in lbl and val != "N/A":
+                try:
+                    warn = float(val.replace("%","").strip()) >= 0.5
+                except Exception: pass
+            if "Eccentricity" in lbl and val != "N/A":
+                try:
+                    warn = float(val.replace("mm","").strip()) >= 10.0
+                except Exception: pass
+            if "Clearance" in lbl and val != "N/A":
+                try:
+                    warn = float(val.replace("m","").strip()) < 0
+                except Exception: pass
+            color = "#DC2626" if warn else "#0F172A"
+            v.setStyleSheet(f"color:{color};font-size:10.5pt;font-weight:bold;font-family:monospace;")
+            v.setToolTip(tip)
+            # Info icon
+            info_lbl = QtWidgets.QLabel("?")
+            info_lbl.setStyleSheet(
+                "color:#94A3B8;font-size:8pt;font-weight:bold;"
+                "background:#F1F5F9;border-radius:8px;padding:1px 5px;")
+            info_lbl.setToolTip(tip)
+            gl.addWidget(l, i, 0)
+            gl.addWidget(v, i, 1, QtCore.Qt.AlignRight)
+            gl.addWidget(info_lbl, i, 2)
         lay.addWidget(grid)
         sf = QtWidgets.QFrame()
         bg = "#FEE2E2" if sg.clearance_violation else "#D1FAE5"
