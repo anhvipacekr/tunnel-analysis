@@ -218,8 +218,24 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         self._idx = (self._idx + 1) % len(self._sections); self._refresh()
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
-        if event.key() == QtCore.Qt.Key_Left: self._prev()
-        elif event.key() == QtCore.Qt.Key_Right: self._next()
+        key = event.key()
+        if key == QtCore.Qt.Key_Left:   self._prev()
+        elif key == QtCore.Qt.Key_Right: self._next()
+        elif key == QtCore.Qt.Key_Home:
+            if self._sections: self._idx = 0; self._refresh()
+        elif key == QtCore.Qt.Key_End:
+            if self._sections: self._idx = len(self._sections)-1; self._refresh()
+        elif key == QtCore.Qt.Key_PageUp:
+            if self._sections:
+                self._idx = max(0, self._idx - 5); self._refresh()
+        elif key == QtCore.Qt.Key_PageDown:
+            if self._sections:
+                self._idx = min(len(self._sections)-1, self._idx + 5); self._refresh()
+        elif key == QtCore.Qt.Key_R:
+            self._reset_zoom()
+        elif key == QtCore.Qt.Key_A:
+            self._toggle_animation(not self._btn_anim.isChecked())
+            self._btn_anim.setChecked(not self._btn_anim.isChecked())
         super().keyPressEvent(event)
 
     def set_sections(self, sections: List[SectionGeometry], profile: str, vl_box_w: float, vl_box_h: float, vl_cir_r: float) -> None:

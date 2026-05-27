@@ -319,6 +319,14 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         auto_btn.clicked.connect(self._slot_auto_pipeline)
         out.addWidget(auto_btn)
         self._auto_btn = auto_btn
+        reset_btn = QtWidgets.QPushButton("Reset Pipeline")
+        reset_btn.setMinimumHeight(30)
+        reset_btn.setStyleSheet(
+            "QPushButton{background:#FEE2E2;color:#DC2626;border:1px solid #FCA5A5;"
+            "border-radius:6px;padding:4px;font-weight:600;font-size:9pt;}"
+            "QPushButton:hover{background:#FECACA;}")
+        reset_btn.clicked.connect(self._slot_reset_pipeline)
+        out.addWidget(reset_btn)
 
         scroll = QtWidgets.QScrollArea(); scroll.setWidgetResizable(True)
         scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
@@ -556,6 +564,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             n_raw = stats.get('n_raw', len(pts)); n_rem = stats.get('n_removed', 0)
             self._log(f"SOR proposal: {n_raw:,} raw -> {len(pts):,} kept, {n_rem:,} noise detected (red).")
             self._log("Review noise in 3D viewport, then use the noise panel to confirm or adjust.")
+            self.sb_msg.setText(f"SOR: {n_rem:,} noise points detected (red) | {len(pts):,} kept (blue)")
             self._show_noise_panel()
 
         elif key == "2.4_semantic":
@@ -1293,6 +1302,74 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         except Exception: pass
         self._refresh_target_table()
         self._log(f"Target {t.name} deleted.")
+
+    def _slot_copy_clipboard(self) -> None:
+        """Copy current results to clipboard as text."""
+        lines = []
+        p = self.context.parameters
+        if p:
+            lines.append("=== Tunnel Analysis Results ===")
+            for k, v in p.items():
+                if isinstance(v, (int, float)) and np.isfinite(float(v)):
+                    lines.append(f"  {k}: {v:.3f}")
+        if self.context.sections:
+            lines.append(f"Sections analyzed: {len(self.context.sections)}")
+            n_viol = sum(1 for s in self.context.sections if s.clearance_violation)
+            lines.append(f"Clearance violations: {n_viol}")
+            lines.append("")
+            lines.append("Chainage(m) | H1(m) | W1(m) | Ovality(%) | Ecc(mm)")
+            lines.append("-" * 55)
+            for s in self.context.sections:
+                h1 = f"{s.H1:.3f}" if np.isfinite(s.H1) else "-"
+                w1 = f"{s.W1:.3f}" if np.isfinite(s.W1) else "-"
+                ov = f"{s.ovality:.2f}" if np.isfinite(s.ovality) else "-"
+                ec = f"{s.eccentricity:.1f}" if np.isfinite(s.eccentricity) else "-"
+                lines.append(f"{s.chainage:.2f}       | {h1}   | {w1}   | {ov}       | {ec}")
+        if not lines:
+            self._log("No results to copy. Run analysis first."); return
+        text = chr(10).join(lines)
+        QtWidgets.QApplication.clipboard().setText(text)
+        self._log(f"Results copied to clipboard ({len(lines)} lines).")
+        QtWidgets.QMessageBox.information(self, "Copied",
+            f"Results copied to clipboard ({len(lines)} lines).")
+
+    def _slot_reset_pipeline(self) -> None:
+        """Reset pipeline — clear all results, keep raw scans."""
+        reply = QtWidgets.QMessageBox.question(self, "Reset Pipeline",
+            "Clear all analysis results?" + chr(10) +
+            "(Raw scan data will be kept)",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        if reply != QtWidgets.QMessageBox.Yes: return
+        self.context.normalized_points  = None
+        self.context.registered_points  = None
+        self.context.centerline         = None
+        self.context.centerline_smooth  = None
+        self.context.frenet_frames      = []
+        self.context.parameters         = {}
+        self.context.heatmap_scalars    = None
+        self.context.sections           = []
+        self.context.polar_map          = None
+        self.context.polar_angles       = None
+        self.context.polar_centers      = None
+        self._targets                   = []
+        self._noise_pts                 = None
+        self._kept_pts                  = None
+        if hasattr(self, "_noise_panel") and self._noise_panel:
+            self._noise_panel.deleteLater()
+            self._noise_panel = None
+        if self.plotter:
+            try:
+                self.plotter.clear()
+                self.plotter.set_background("#F8FAFC")
+                self.plotter.render()
+            except Exception: pass
+        self.results_text.clear()
+        self.pt_label.setText("Points: --")
+        self.sb_pts.setText("Points: --")
+        self.sb_msg.setText("Pipeline reset. Raw scans preserved.")
+        self.sb_prog.setValue(0)
+        self._refresh_target_table()
+        self._log("Pipeline reset complete. Raw scans preserved.")
 
     def _slot_4_3b_bspline(self) -> None:
         self._hdr("B-Spline C2 Centerline (PDF 3.4)", "Sliding-window curvature detection + B-spline C2 fit.")
