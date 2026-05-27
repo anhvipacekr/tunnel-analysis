@@ -76,16 +76,26 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         self._btn_next.setMinimumWidth(80)
         self._btn_reset.setMinimumWidth(110)
         self._btn_reset.setToolTip("Reset zoom to fit section")
+        self._btn_info = QtWidgets.QPushButton("Info")
+        self._btn_info.setStyleSheet(
+            "QPushButton{background:#047857;color:white;border-radius:5px;"
+            "padding:5px 12px;font-weight:700;font-size:10pt;border:none;}"
+            "QPushButton:hover{background:#065F46;}")
+        self._btn_info.setMinimumWidth(60)
+        self._btn_info.setToolTip("Show section parameters")
+        self._current_sg = None
         self._lbl_ch = QtWidgets.QLabel("Current chainage: --")
         self._lbl_ch.setAlignment(QtCore.Qt.AlignCenter)
         self._lbl_ch.setStyleSheet("color:white;font-weight:bold;font-size:11pt;background:transparent;")
         self._btn_prev.clicked.connect(self._prev)
         self._btn_next.clicked.connect(self._next)
         self._btn_reset.clicked.connect(self._reset_zoom)
+        self._btn_info.clicked.connect(self._show_info_dialog)
         nav.addWidget(self._btn_prev)
         nav.addWidget(self._lbl_ch, 1)
         nav.addWidget(self._btn_next)
         nav.addWidget(self._btn_reset)
+        nav.addWidget(self._btn_info)
         lay.addWidget(nav_frame)
 
         # Section slider
@@ -510,23 +520,8 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                   edgecolor="#CCCCCC", labelcolor="#111111",
                   loc="lower right", framealpha=0.95, borderpad=0.6)
 
-        # ── 5. Title block (engineering drawing) bottom-right ─────────────
-        tb_lines = [
-            f"Project : CBNU Smart Structure Lab",
-            f"Profile : {self._profile}",
-            f"Chainage: {sg.chainage:.3f} m",
-            f"R_fit   : {sg.radius_fit:.3f} m" if np.isfinite(sg.radius_fit) else "R_fit   : N/A",
-            f"Ovality : {sg.ovality:.3f} %" if np.isfinite(sg.ovality) else "Ovality : N/A",
-            f"Ecc     : {sg.eccentricity:.2f} mm" if np.isfinite(sg.eccentricity) else "Ecc     : N/A",
-            f"Status  : {'VIOLATION' if sg.clearance_violation else 'OK'}",
-        ]
-        tb_text = "\n".join(tb_lines)
-        ax.text(0.995, 0.005, tb_text, transform=ax.transAxes,
-                fontsize=6.8, va="bottom", ha="right",
-                fontfamily="monospace", color="#1E293B",
-                bbox=dict(facecolor="#F8FAFC", edgecolor="#CBD5E1",
-                          boxstyle="round,pad=0.5", alpha=0.97), zorder=9)
-
+        # Title block moved to Info dialog button
+        self._current_sg = sg
         # ── Info panel below plot ──────────────────────────────────────────
         if hasattr(self, "_info_label"):
             parts = [f"Ch:{sg.chainage:.2f}m"]
