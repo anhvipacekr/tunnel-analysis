@@ -61,14 +61,14 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         nav = QtWidgets.QHBoxLayout(nav_frame)
         nav.setContentsMargins(6, 4, 6, 4); nav.setSpacing(6)
         btn_style = ("QPushButton{background:#1D4ED8;color:white;border-radius:5px;"
-            "padding:5px 14px;font-weight:700;font-size:10pt;border:none;}"
+            "padding:4px 10px;font-weight:700;font-size:9.5pt;border:none;min-width:60px;}"
             "QPushButton:hover{background:#2563EB;}")
         expand_style = ("QPushButton{background:#047857;color:white;border-radius:5px;"
-            "padding:5px 14px;font-weight:700;font-size:10pt;border:none;}"
+            "padding:4px 10px;font-weight:700;font-size:9.5pt;border:none;min-width:55px;}"
             "QPushButton:hover{background:#065F46;}")
-        self._btn_prev = QtWidgets.QPushButton("\u25C0  Prev")
-        self._btn_next = QtWidgets.QPushButton("Next  \u25B6")
-        self._btn_reset = QtWidgets.QPushButton("\u27F3  Reset Zoom")
+        self._btn_prev = QtWidgets.QPushButton("\u25C0 Prev")
+        self._btn_next = QtWidgets.QPushButton("Next \u25B6")
+        self._btn_reset = QtWidgets.QPushButton("\u27F3 Zoom")
         self._btn_prev.setStyleSheet(btn_style)
         self._btn_next.setStyleSheet(btn_style)
         self._btn_reset.setStyleSheet(expand_style)
@@ -76,18 +76,18 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         self._btn_next.setMinimumWidth(80)
         self._btn_reset.setMinimumWidth(110)
         self._btn_reset.setToolTip("Reset zoom to fit section")
-        self._btn_info = QtWidgets.QPushButton("Info")
-        self._btn_info.setStyleSheet(
+        self._btn_reset.setToolTip("Reset zoom (R)")
+        self._btn_info = QtWidgets.QPushButton("\u24d8 Info")
             "QPushButton{background:#047857;color:white;border-radius:5px;"
             "padding:5px 12px;font-weight:700;font-size:10pt;border:none;}"
             "QPushButton:hover{background:#065F46;}")
         self._btn_info.setMinimumWidth(60)
         self._btn_info.setToolTip("Show section parameters")
         self._current_sg = None
-        self._lbl_ch = QtWidgets.QLabel("Current chainage: --")
+        self._current_sg = None
+        self._lbl_ch = QtWidgets.QLabel("Ch: --")
         self._lbl_ch.setAlignment(QtCore.Qt.AlignCenter)
-        self._lbl_ch.setStyleSheet("color:white;font-weight:bold;font-size:11pt;background:transparent;")
-        self._btn_prev.clicked.connect(self._prev)
+        self._lbl_ch.setStyleSheet("color:white;font-weight:bold;font-size:10pt;background:transparent;min-width:100px;")
         self._btn_next.clicked.connect(self._next)
         self._btn_reset.clicked.connect(self._reset_zoom)
         self._btn_info.clicked.connect(self._show_info_dialog)
@@ -131,14 +131,14 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             # Matplotlib navigation toolbar (zoom/pan)
             from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
             self._toolbar = NavigationToolbar2QT(self._canvas, self)
+            self._toolbar = NavigationToolbar2QT(self._canvas, self)
             self._toolbar.setStyleSheet(
-                "QToolBar{background:#F1F5F9;border-top:1px solid #E2E8F0;spacing:4px;}"
-                "QToolButton{background:#FFFFFF;border:1px solid #E2E8F0;border-radius:4px;"
-                "padding:3px;margin:2px;}"
-                "QToolButton:hover{background:#DBEAFE;border-color:#3B82F6;}"
-                "QToolButton:checked{background:#BFDBFE;border-color:#1D4ED8;}")
-            lay.addWidget(self._toolbar)
-        else:
+                "QToolBar{background:#1E3A5F;border-top:2px solid #0F4C81;spacing:2px;padding:2px 4px;}"
+                "QToolButton{background:#2D5A8E;border:1px solid #3B7DD8;border-radius:4px;"
+                "padding:4px 6px;margin:1px;color:white;font-size:9pt;min-width:26px;min-height:22px;}"
+                "QToolButton:hover{background:#3B7DD8;border-color:#60A5FA;}"
+                "QToolButton:checked{background:#1D4ED8;border-color:#93C5FD;}")
+            self._toolbar.setIconSize(QtCore.QSize(16, 16))
             lay.addWidget(QtWidgets.QLabel("Matplotlib is required for 2D cross-section plotting."))
         # Epoch overlay + animation controls
         ctrl = QtWidgets.QHBoxLayout(); ctrl.setSpacing(6)
@@ -374,7 +374,7 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
     def _refresh(self) -> None:
         if not _MPL_OK or not self._sections: self._draw_empty(); return
         sg = self._sections[self._idx]
-        self._lbl_ch.setText(f"Chainage: {sg.chainage:.2f} m  ({self._idx + 1}/{len(self._sections)})")
+        self._lbl_ch.setText(f"Ch: {sg.chainage:.2f}m  [{self._idx + 1}/{len(self._sections)}]")
         if hasattr(self, "_slider_ch"):
             self._slider_ch.blockSignals(True)
             self._slider_ch.setValue(self._idx)
