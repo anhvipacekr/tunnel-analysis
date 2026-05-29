@@ -336,60 +336,59 @@ class TunnelAnalysisWindow(DispatchMixin, SlotsMixin, StationMixin, RenderMixin,
 
         SECTIONS = [
             (1, "LiDAR data acquisition", "Base", [
-                ("1.1  Import LAS / PLY data", self._slot_1_1_import),
-                ("1.2  Initialize 3D viewport", self._slot_1_2_viewport),
-                ("1.3  Add scan station (+)", self._slot_1_3_add_scan),
-                ("1.4  Register & merge all stations", self._slot_1_4_merge),
-                ("1.5  Rough alignment (manual)", self._slot_1_5_rough),
-                ("1.6  Chain register & merge", self._slot_1_6_chain),
-                ("1.7  Registration error heatmap", self._slot_1_7_reg_error),
+                ("1.1  Import LAS / PLY data", self._slot_1_1_import, "Tai du lieu diem tu file LAS/LAZ/PLY vao he thong"),
+                ("1.2  Initialize 3D viewport", self._slot_1_2_viewport, "Khoi tao cua so hien thi 3D PyVista"),
+                ("1.3  Add scan station", self._slot_1_3_add_scan, "Them tram scan moi vao danh sach"),
+                ("1.4  Register and merge all stations", self._slot_1_4_merge, "Dang ky va gop tat ca tram scan thanh 1 dam may diem"),
+                ("1.5  Rough alignment (manual)", self._slot_1_5_rough, "Can chinh thu cong bang offset va goc xoay"),
+                ("1.6  Chain register and merge", self._slot_1_6_chain, "Dang ky day chuyen S1->S2->S3 theo thu tu"),
+                ("1.7  Registration error heatmap", self._slot_1_7_reg_error, "Hien thi ban do sai so dang ky giua cac tram"),
             ]),
             (2, "Preprocessing and noise filtering", "Pre.", [
-                ("2.1  Voxel downsampling", self._slot_2_1_voxel),
-                ("2.2  Statistical outlier removal", self._slot_2_2_sor),
-                ("2.3  Extract tunnel lining shell", self._slot_2_3_lining),
-                ("2.4  Semantic noise removal (PDF 3.2)", self._slot_2_4_semantic),
+                ("2.1  Voxel downsampling", self._slot_2_1_voxel, "Giam mat do diem bang luoi voxel, giu hinh dang ham"),
+                ("2.2  Statistical outlier removal", self._slot_2_2_sor, "Loai diem nhieu bang thong ke median+MAD theo tung mat cat"),
+                ("2.3  Extract tunnel lining shell", self._slot_2_3_lining, "Trich xuat be mat vo ham, loai bo cap dien va den"),
+                ("2.4  Semantic noise removal (PDF 3.2)", self._slot_2_4_semantic, "Phan loai va loai bo: cap=linearity cao, den=sphericity cao, nguoi=chieu cao 1.2-2.2m"),
             ]),
             (3, "Registration and synchronization", "Reg.", [
-                ("3.1  Anchor translation", self._slot_3_1_anchor),
-                ("3.2  Fine surface ICP", self._slot_3_2_icp),
-                ("3.3  Calculate RMSE", self._slot_3_3_rmse),
+                ("3.1  Anchor translation", self._slot_3_1_anchor, "Dich chuyen diem dua tren diem neo cuong do cao nhat"),
+                ("3.2  Fine surface ICP", self._slot_3_2_icp, "Tinh chinh dang ky bang ICP point-to-plane 2 buoc"),
+                ("3.3  Calculate RMSE", self._slot_3_3_rmse, "Tinh sai so RMSE giua dam may diem hien tai va tham chieu"),
             ]),
             (4, "Geometric coordinate system", "Geo.", [
-                ("4.1  Extract PCA centerline", self._slot_4_1_centerline),
-                ("4.2  Iterative centerline refinement", self._slot_4_2_iterative),
-                ("4.3  Smooth B-Spline centerline", self._slot_4_3_bspline),
-                ("4.3b B-Spline C2 centerline (PDF 3.4)", self._slot_4_3b_bspline),
-                ("4.4  Generate gravity-aligned N-B sections", self._slot_4_4_frenet),
-                ("4.5  Detect ring seams", self._slot_4_5_seams),
-                ("4.5b Intensity ring seam detection (PDF 3.3)", self._slot_4_5b_intensity_seams),
+                ("4.1  Extract PCA centerline", self._slot_4_1_centerline, "Trich xuat duong tam ham bang PCA sliding window"),
+                ("4.2  Iterative centerline refinement", self._slot_4_2_iterative, "Tinh chinh duong tam bang RANSAC circle per section (Yi 2020)"),
+                ("4.3  Smooth B-Spline centerline", self._slot_4_3_bspline, "Lam min duong tam bang B-Spline bac 3"),
+                ("4.3b B-Spline C2 centerline (PDF 3.4)", self._slot_4_3b_bspline, "Duong tam B-Spline lien tuc C2, khong co goc gap"),
+                ("4.4  Generate Frenet N-B sections", self._slot_4_4_frenet, "Tao he toa do Frenet-Serret T/N/B can bang theo trong luc"),
+                ("4.5  Detect ring seams", self._slot_4_5_seams, "Phat hien duong noi vong be tong bang phan cum"),
+                ("4.5b Intensity ring seam detection (PDF 3.3)", self._slot_4_5b_intensity_seams, "Phat hien duong noi vong bang dao ham cuong do laser"),
             ]),
             (5, "Parameter extraction", "Param.", [
-                ("5.1  Crown settlement dv", self._slot_5_1_settlement),
-                ("5.2  Horizontal convergence dh", self._slot_5_2_convergence),
-                ("5.3  3D deformation heatmap", self._slot_5_3_heatmap),
-                ("5.3b Hausdorff heatmap T0→Tn (PDF 3.5)", self._slot_5_3b_hausdorff),
-                ("5.4  Polar radial deformation dr", self._slot_5_4_polar),
-                ("5.5  Ovality epsilon", self._slot_5_5_ovality),
-                ("5.6  Section eccentricity e", self._slot_5_6_eccentricity),
-                ("5.7  Plot 2D Technical Section", self._slot_5_7_sections),
-                ("5.8  Clearance 3D violation map", self._slot_5_8_clearance_3d),
+                ("5.1  Crown settlement dv", self._slot_5_1_settlement, "Do lun dinh ham: dich chuyen dung tai diem cao nhat"),
+                ("5.2  Horizontal convergence dh", self._slot_5_2_convergence, "Do hoi tu ngang: tong dich chuyen 2 tuong vao trong"),
+                ("5.3  3D deformation heatmap", self._slot_5_3_heatmap, "Ban do nhiet bien dang 3D: xanh<1mm vang 1-3mm do>3mm"),
+                ("5.3b Hausdorff heatmap T0->Tn (PDF 3.5)", self._slot_5_3b_hausdorff, "Khoang cach Hausdorff T0->Tn: do bien dang theo thoi gian"),
+                ("5.4  Polar radial deformation dr", self._slot_5_4_polar, "Bien dang huong kinh dr(theta) theo tung goc quanh mat cat"),
+                ("5.5  Ovality epsilon", self._slot_5_5_ovality, "Do oval hoa epsilon=(a-b)/a*100%: muc do bien dang hinh dang"),
+                ("5.6  Section eccentricity e", self._slot_5_6_eccentricity, "Do lech tam e: khoang cach tam do vs tam thiet ke"),
+                ("5.7  Plot 2D Technical Section", self._slot_5_7_sections, "Ve mat cat ky thuat 2D theo mat phang Frenet N-B"),
+                ("5.8  Clearance 3D violation map", self._slot_5_8_clearance_3d, "Ban do 3D vi pham gioi han khoang thong xe"),
             ]),
             (6, "Time-series analysis", "T-S", [
-                ("6.1  Load T0 and Tn epochs", self._slot_6_1_epochs),
-                ("6.2  Plot deformation trend", self._slot_6_2_plot),
+                ("6.1  Load T0 and Tn epochs", self._slot_6_1_epochs, "Tai 2 file diem: T0=tham chieu, Tn=do lan sau"),
+                ("6.2  Plot deformation trend", self._slot_6_2_plot, "Ve bieu do xu huong bien dang cloud-to-cloud T0->Tn"),
             ]),
             (7, "BIM and AI", "BIM/AI", [
-                ("7.1  Export IFC package", self._slot_7_1_ifc),
-                ("7.2  Query structural AI assistant", self._slot_7_2_query_ai),
+                ("7.1  Export IFC package", self._slot_7_1_ifc, "Xuat mo hinh IFC4 voi solid geometry Wall/Slab/Space"),
+                ("7.2  Query structural AI assistant", self._slot_7_2_query_ai, "Hoi AI ve tinh trang ham, nguong an toan, khuyen nghi"),
             ]),
         ]
         for step, title_s, tag, buttons in SECTIONS:
             sec = CollapsibleSection(title_s, step, tag)
-            for label, slot in buttons:
-                btn = sec.add_sub_button(label, slot); self._all_sub_btns.append(btn)
+            for label, slot, tip in buttons:
+                btn = sec.add_sub_button(label, slot, tip); self._all_sub_btns.append(btn)
             sl.addWidget(sec)
-
         sl.addStretch()
         self.pt_label   = QtWidgets.QLabel("Points: --")
         self.rmse_label = QtWidgets.QLabel("RMSE: --")
