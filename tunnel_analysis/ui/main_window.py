@@ -434,9 +434,31 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _btns_enabled(self, en: bool) -> None:
         for b in self._all_sub_btns: b.setEnabled(en)
 
+
+    _TAB_MAP = {
+        "1.1_import": 1, "1.2_viewport": 0, "1.3_add": 2, "1.4_merge": 0,
+        "1.5_rough": 0, "1.6_chain": 0, "1.7_reg_error": 0,
+        "2.1_voxel": 0, "2.2_sor": 0, "2.3_lining": 0, "2.4_semantic": 0,
+        "3.1_anchor": 0, "3.2_icp": 0, "3.3_rmse": 0,
+        "4.1_centerline": 0, "4.2_iterative": 0, "4.3_bspline": 0,
+        "4.3b_bspline": 0, "4.4_frenet": 0, "4.5_seams": 0,
+        "4.5b_intensity_seams": 0,
+        "5.1_settlement": 0, "5.2_convergence": 0, "5.3_heatmap": 0,
+        "5.3b_hausdorff": 0, "5.4_polar": 6, "5.5_ovality": 0,
+        "5.6_eccentricity": 0, "5.7_sections": 5, "5.8_clearance_3d": 0,
+        "6.1_epochs": 1, "6.2_plot": 4,
+        "7.1_ifc": 7, "7.2_ai": 7,
+        "8.1_csv": 0, "8.2_excel": 0, "8.3_pdf": 0, "8.4_web": 0,
+    }
+
+    def _auto_switch_tab(self, key: str) -> None:
+        idx = self._TAB_MAP.get(key)
+        if idx is not None:
+            self.right_tabs.setCurrentIndex(idx)
+
     @QtCore.Slot(str, object)
     def _on_finished(self, key: str, result: object) -> None:
-        self.sb_prog.setValue(100); self.sb_msg.setText(f"Task completed: {key}"); self._dispatch(key, result); self._check_auto_pipeline(key)
+        self.sb_prog.setValue(100); self.sb_msg.setText(f"Task completed: {key}"); self._auto_switch_tab(key); self._dispatch(key, result); self._check_auto_pipeline(key)
 
     @QtCore.Slot(str, str)
     def _on_failed(self, key: str, msg: str) -> None:
