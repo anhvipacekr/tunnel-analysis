@@ -24,14 +24,14 @@ class CollapsibleSection(QtWidgets.QWidget):
         self._btn.setArrowType(QtCore.Qt.DownArrow if checked else QtCore.Qt.RightArrow)
         self._body.setVisible(checked)
 
-    def add_sub_button(self, label: str, slot: Callable) -> QtWidgets.QPushButton:
+    def add_sub_button(self, label: str, slot: Callable, tooltip: str = "") -> QtWidgets.QPushButton:
         b = QtWidgets.QPushButton(f"  - {label}")
         b.setObjectName("SubButton"); b.setMinimumHeight(32)
         b.setCursor(QtCore.Qt.PointingHandCursor); b.clicked.connect(slot)
+        if tooltip:
+            b.setToolTip(tooltip)
+            b.setToolTipDuration(4000)
         self._blay.addWidget(b); return b
-
-    def all_sub_buttons(self) -> List[QtWidgets.QPushButton]:
-        return self._body.findChildren(QtWidgets.QPushButton)
 
 
 # ------------------------------------------------------------------------------

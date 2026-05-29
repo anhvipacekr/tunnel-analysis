@@ -733,8 +733,21 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         elif key == "6.2_plot":
             series = np.asarray(result, dtype=np.float64); self.context.time_series_plot = series
-            self.ts_plot.set_values(series, "Deformation Trend Chart Across Chainage Line (mm)")
+            self.ts_plot.set_values(series, "Cloud-to-Cloud Displacement T0->Tn (mm)")
             self.right_tabs.setCurrentIndex(2)
+            # Log C2C stats
+            try:
+                _, _, stats = self.ts_mod.compute_cloud_to_cloud(self.context)
+                self._log("--- Cloud-to-Cloud Displacement T0 -> Tn (PDF 3.5) ---")
+                self._log(f"  ICP alignment RMSE    : {stats['icp_rmse_mm']:.3f} mm")
+                self._log(f"  Mean displacement     : {stats['c2c_mean_mm']:.3f} mm")
+                self._log(f"  Median displacement   : {stats['c2c_median_mm']:.3f} mm")
+                self._log(f"  Max displacement      : {stats['c2c_max_mm']:.3f} mm")
+                self._log(f"  95th percentile       : {stats['c2c_p95_mm']:.3f} mm")
+                self._log(f"  Points T0 / Tn        : {stats['n_points_t0']:,} / {stats['n_points_tn']:,}")
+                self._log("------------------------------------------------")
+            except Exception as ex:
+                self._log(f"  [Stats error] {ex}")
 
         elif key == "8.1_csv":
             path = result
